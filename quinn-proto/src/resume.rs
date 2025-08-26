@@ -28,7 +28,8 @@ pub enum CrState {
     Normal,
 }
 //TODO: add deleted qlog metrics back in
-pub struct OwnResume {
+#[derive(Clone)]
+pub(crate) struct OwnResume {
     enabled: bool,
     cr_state: CrState,
     saved_rtt: Duration,
@@ -53,7 +54,7 @@ impl std::fmt::Debug for OwnResume {
 }
 
 impl OwnResume {
-    pub fn new(file_name: &str) -> Self {
+    pub(crate) fn new(file_name: &str) -> Self {
         // enabled will become false if either of the required CR ENV VARS is not supplied
         let mut enabled = true;
         let mut saved_rtt = Duration::from_secs(u64::MAX);
@@ -113,13 +114,13 @@ impl OwnResume {
         }
     }
 
-    pub fn setup(&mut self, saved_rtt: Duration, saved_cwnd: usize) {
+    pub(crate) fn setup(&mut self, saved_rtt: Duration, saved_cwnd: usize) {
         self.enabled = true;
         self.saved_rtt = saved_rtt;
         self.saved_cwnd = saved_cwnd;
     }
 
-    pub fn enabled(&mut self) -> bool {
+    pub(crate) fn enabled(&mut self) -> bool {
         if self.enabled {
             println!("is enabled,state is {:?}", self.cr_state);
 
@@ -134,26 +135,26 @@ impl OwnResume {
             false
         }
     }
-    pub fn get_state(&self) -> CrState {
+    pub(crate) fn get_state(&self) -> CrState {
         self.cr_state
     }
-    pub fn get_pipesize(&self) -> usize {
+    pub(crate) fn get_pipesize(&self) -> usize {
         self.pipesize
     }
 
-    pub fn get_saved_rtt(&self) -> u64 {
+    pub(crate) fn get_saved_rtt(&self) -> u64 {
         self.saved_rtt.as_secs() as u64
     }
 
-    pub fn get_saved_cwnd(&self) -> f64 {
+    pub(crate) fn get_saved_cwnd(&self) -> f64 {
         self.saved_cwnd as f64
     }
 
     #[inline]
-    pub fn change_state(&mut self, state: CrState) {
+    pub(crate) fn change_state(&mut self, state: CrState) {
         self.cr_state = state;
     }
-    pub fn get_jump_cwnd(&self) -> usize {
+    pub(crate) fn get_jump_cwnd(&self) -> usize {
         self.jump_cwnd
     }
 
@@ -161,7 +162,7 @@ impl OwnResume {
         self.time_in_state = Instant::now()
     }
     // Returns (new_cwnd, new_ssthresh), both optional
-    pub fn process_ack(
+    pub(crate) fn on_ack(
         &mut self,
         largest_pkt_sent: u64,
         bytes: usize,
@@ -191,7 +192,7 @@ impl OwnResume {
             }
             CrState::Validating(last_packet) => {
                 self.pipesize += bytes;
-                if packet.pkt_num >= last_packet {
+                if largest_pkt_sent >= last_packet {
                     self.change_state(
                         CrState::Normal,
                         //CarefulResumeTrigger::LastUnvalidatedPacketAcknowledged,
@@ -200,7 +201,7 @@ impl OwnResume {
                 (None, None)
             }
             CrState::SafeRetreat(last_packet) => {
-                if packet.pkt_num >= last_packet {
+                if largest_pkt_sent >= last_packet {
                     trace!("careful resume complete");
                     self.change_state(
                         CrState::Normal,
@@ -217,7 +218,7 @@ impl OwnResume {
     }
 
     //returns cwnd
-    pub fn send_packet(
+    pub(crate) fn send_packet(
         &mut self,
         rtt_sample: Option<Duration>,
         cwnd: usize,
@@ -272,7 +273,7 @@ impl OwnResume {
         }
     }
 
-    pub fn congestion_event(&mut self, largest_pkt_sent: u64) -> usize {
+    pub(crate) fn congestion_event(&mut self, largest_pkt_sent: u64) -> usize {
         println!("in congestion event!!");
         match self.cr_state {
             CrState::Unvalidated(_) => {

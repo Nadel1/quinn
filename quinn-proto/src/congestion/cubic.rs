@@ -2,9 +2,11 @@ use std::any::Any;
 use std::cmp;
 use std::sync::Arc;
 
+
+
 use super::{BASE_DATAGRAM_SIZE, Controller, ControllerFactory};
-use crate::resume;
 use crate::connection::RttEstimator;
+use crate::resume::{self, CrState};
 use crate::{Duration, Instant};
 
 /// CUBIC Constants.
@@ -71,7 +73,8 @@ pub struct Cubic {
     /// after this time is acknowledged, QUIC exits recovery.
     recovery_start_time: Option<Instant>,
     cubic_state: State,
-    current_mtu: u64
+    current_mtu: u64,
+    resume: resume::OwnResume,
 }
 
 impl Cubic {
@@ -83,7 +86,8 @@ impl Cubic {
             recovery_start_time: None,
             config,
             cubic_state: Default::default(),
-            current_mtu: current_mtu as u64
+            current_mtu: current_mtu as u64,
+            resume: resume::OwnResume::new(SAVED_CC_FILE),
         }
     }
 
@@ -112,7 +116,19 @@ impl Controller for Cubic {
 
         if self.window < self.ssthresh {
             // Slow start
-            self.window += bytes;
+            //TODO: add changinging of cwnd with cr states
+            if self.resume.enabled() {
+                let cr_state = self.resume.get_state();
+                match cr_state {
+                    CrState::Unvalidated(_) => {}
+                    CrState::SafeRetreat(_) => {}
+                    _ => {
+                        self.window += bytes;
+                    }
+                }
+            } else {
+                self.window += bytes;
+            }
         } else {
             // Congestion avoidance.
             let ca_start_time;
