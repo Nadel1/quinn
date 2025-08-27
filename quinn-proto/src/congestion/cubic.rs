@@ -82,6 +82,7 @@ pub struct Cubic {
     /// Copy of the controller state to restore when a spurious congestion event is detected.
     pre_congestion_state: Option<State>,
     resume: resume::OwnResume,
+    pacing_rate: u64,
 }
 
 impl Cubic {
@@ -97,6 +98,7 @@ impl Cubic {
             pre_congestion_state: None,
             config,
             resume: resume::OwnResume::new(resume::SAVED_CC_FILE),
+            pacing_rate: 0,
         }
     }
 
@@ -128,11 +130,10 @@ impl Controller for Cubic {
             // Slow start
             //TODO: add changinging of cwnd with cr states
             if self.resume.enabled() {
+                println!("------------Careful resume is enabled!!!------------");
                 let cr_state = self.resume.get_state();
                 match cr_state {
-                    CrState::Unvalidated => {
-                        self.window = self.resume.get_jump_cwnd() as u64;
-                    }
+                    CrState::Unvalidated => {}
                     CrState::SafeRetreat(_) => {}
                     _ => {
                          self.state.window += bytes;
@@ -291,6 +292,10 @@ impl Controller for Cubic {
 
     fn set_ssthresh(&self, new_ssthresh: Option<u64>) {
         todo!()
+    }
+
+    fn set_pacing_rate(&mut self, new_pacing_rate: u64) {
+        self.pacing_rate = new_pacing_rate;
     }
 }
 

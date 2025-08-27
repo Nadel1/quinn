@@ -1511,12 +1511,12 @@ impl Connection {
                 false
             }
         };
-        let bytes_acked = self.total_acked;
+        let bytes_acked = self.resume.total_acked;
 
-        let iw_acked = self.total_acked >= self.path.congestion.initial_window();
+        let iw_acked = bytes_acked >= self.path.congestion.initial_window();
         println!(
             "total acked_bytes is {:} and initial_window is {:} and iw_acked is {:}",
-            self.total_acked,
+            bytes_acked,
             self.path.congestion.initial_window(),
             iw_acked
         );
@@ -1599,15 +1599,39 @@ impl Connection {
                 self.path.first_packet_after_rtt_sample =
                     Some((space, self.spaces[space].next_packet_number));
             }
-            if self.resume.enabled() {
-                self.resume.send_packet(
-                    self.path.rtt.get(),
-                    self.path.congestion.window(),
-                    self.app_limited,
-                    iw_acked,
-                );
+        }
+        if self.resume.enabled() {
+            let cwnd = self.resume.send_packet(
+                self.path.rtt.get(),
+                self.path.congestion.window(),
+                self.app_limited,
+                iw_acked,
+            );
+            self.path.congestion.set_cwnd(cwnd);
+            match self.resume.get_state() {
+                resume::CrState::Normal => {
+                    if !self.path.rtt.get().is_zero() {
+                        let rate = resume::PACING_MULTIPLIER * self.path.congestion.window() as f64
+                            / self.path.rtt.get().as_secs_f64();
+                        self.path.congestion.set_pacing_rate(rate as u64);
+                    }
+                }
+                resume::CrState::Unvalidated => {
+                    if !self.path.rtt.get().is_zero() {
+                        //see page 19 of https://datatracker.ietf.org/doc/draft-ietf-tsvwg-careful-resume/
+                        let inter_transmission_time: f64 = (self.path.rtt.get().as_secs_f64()
+                            * 1200 as f64)
+                            / self.resume.get_jump_cwnd() as f64;
+
+                        self.path
+                            .congestion
+                            .set_pacing_rate(inter_transmission_time as u64);
+                    }
+                }
+                _ => {}
             }
         }
+
         match self.resume.get_state() {
             resume::CrState::Normal => {
                 self.calculate_saved_params();
