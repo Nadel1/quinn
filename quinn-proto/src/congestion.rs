@@ -89,6 +89,10 @@ pub trait Controller: Send + Sync {
 
     /// Returns Self for use in down-casting to extract implementation details
     fn into_any(self: Box<Self>) -> Box<dyn Any>;
+
+    /// methods used by careful resume to change the cwnd and ssthresh accordingly
+    fn set_cwnd(&self, new_window: u64);
+    fn set_ssthresh(&self, new_ssthresh: Option<u64>);
 }
 
 /// Common congestion controller metrics

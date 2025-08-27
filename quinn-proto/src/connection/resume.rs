@@ -1,7 +1,6 @@
 // Based on: https://github.com/ana-cc/quiche/blob/resume_latest/quiche/src/recovery/congestion/resume.rs (11.08.2025)
 
 use std::{
-    cmp,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     u64,
 };
@@ -11,7 +10,7 @@ use std::path::Path;
 
 use tracing::trace;
 
-const SAVED_CC_FILE: &str = "saved_params.csv";
+pub(crate) const SAVED_CC_FILE: &str = "saved_params.csv";
 const PARAMS_MAXIMUM_GAP: Duration = Duration::from_secs(120 * 60);
 const MAX_JUMP: usize = 2000; //configured max cwnd
 
@@ -21,7 +20,7 @@ pub enum CrState {
     #[default]
     Reconnaissance,
     // The next two states store the first packet sent when entering that state
-    Unvalidated(u64),
+    Unvalidated,
     Validating(u64),
     // Stores the last packet sent during the Unvalidated Phase
     SafeRetreat(u64),
@@ -33,12 +32,12 @@ pub(crate) struct OwnResume {
     enabled: bool,
     cr_state: CrState,
     saved_rtt: Duration,
-    saved_cwnd: usize,
-    pipesize: usize,
-    jump_cwnd: usize,
-    pub total_acked: usize,
+    saved_cwnd: u64,
+    pipesize: u64,
+    jump_cwnd: u64,
+    pub total_acked: u64,
     time_in_state: Instant, //make sure we dont stay in unvalidated phase longer than one rtt
-    cwnd: usize,
+    cwnd: u64,
     rtt: Option<Duration>,
 }
 
@@ -74,7 +73,7 @@ impl OwnResume {
                 }
 
                 let cwnd_string = file_array[3];
-                if let Ok(cwnd_int) = cwnd_string.parse::<usize>() {
+                if let Ok(cwnd_int) = cwnd_string.parse::<u64>() {
                     saved_cwnd = cwnd_int;
                     println!("Found saved cwnd! {:?}", saved_cwnd);
                 } else {
@@ -114,12 +113,6 @@ impl OwnResume {
         }
     }
 
-    pub(crate) fn setup(&mut self, saved_rtt: Duration, saved_cwnd: usize) {
-        self.enabled = true;
-        self.saved_rtt = saved_rtt;
-        self.saved_cwnd = saved_cwnd;
-    }
-
     pub(crate) fn enabled(&mut self) -> bool {
         if self.enabled {
             println!("is enabled,state is {:?}", self.cr_state);
@@ -138,7 +131,7 @@ impl OwnResume {
     pub(crate) fn get_state(&self) -> CrState {
         self.cr_state
     }
-    pub(crate) fn get_pipesize(&self) -> usize {
+    pub(crate) fn get_pipesize(&self) -> u64 {
         self.pipesize
     }
 
@@ -154,7 +147,7 @@ impl OwnResume {
     pub(crate) fn change_state(&mut self, state: CrState) {
         self.cr_state = state;
     }
-    pub(crate) fn get_jump_cwnd(&self) -> usize {
+    pub(crate) fn get_jump_cwnd(&self) -> u64 {
         self.jump_cwnd
     }
 
@@ -162,18 +155,17 @@ impl OwnResume {
         self.time_in_state = Instant::now()
     }
     // Returns (new_cwnd, new_ssthresh), both optional
-    pub(crate) fn on_ack(
+    pub(crate) fn process_ack(
         &mut self,
-        largest_pkt_sent: u64,
-        bytes: usize,
-        flightsize: usize,
-        iw_acked: bool,
-    ) -> (Option<usize>, Option<usize>) {
+        largest_pkt_ack: u64,
+        bytes_acked: u64,
+        flightsize: u64,
+    ) -> (Option<u64>, Option<u64>) {
         println!("in process ack!!");
-        self.total_acked += bytes;
+        self.total_acked += bytes_acked;
         match self.cr_state {
-            CrState::Unvalidated(first_packet) => {
-                self.pipesize += bytes;
+            CrState::Unvalidated => {
+                self.pipesize += bytes_acked;
 
                 if flightsize <= self.pipesize {
                     self.change_state(
@@ -184,15 +176,15 @@ impl OwnResume {
                 } else {
                     // Store the last packet number that was sent in the Unvalidated Phase
                     self.change_state(
-                        CrState::Validating(largest_pkt_sent),
+                        CrState::Validating(largest_pkt_ack),
                         // CarefulResumeTrigger::FirstUnvalidatedPacketAcknowledged,
                     );
                     (Some(flightsize), None)
                 }
             }
             CrState::Validating(last_packet) => {
-                self.pipesize += bytes;
-                if largest_pkt_sent >= last_packet {
+                self.pipesize += bytes_acked;
+                if largest_pkt_ack >= last_packet {
                     self.change_state(
                         CrState::Normal,
                         //CarefulResumeTrigger::LastUnvalidatedPacketAcknowledged,
@@ -201,7 +193,7 @@ impl OwnResume {
                 (None, None)
             }
             CrState::SafeRetreat(last_packet) => {
-                if largest_pkt_sent >= last_packet {
+                if largest_pkt_ack >= last_packet {
                     trace!("careful resume complete");
                     self.change_state(
                         CrState::Normal,
@@ -209,7 +201,7 @@ impl OwnResume {
                     );
                     (None, Some(self.pipesize))
                 } else {
-                    self.pipesize += bytes;
+                    self.pipesize += bytes_acked;
                     (None, None)
                 }
             }
@@ -221,11 +213,10 @@ impl OwnResume {
     pub(crate) fn send_packet(
         &mut self,
         rtt_sample: Option<Duration>,
-        cwnd: usize,
-        largest_pkt_sent: u64,
+        cwnd: u64,
         app_limited: bool,
         iw_acked: bool,
-    ) -> usize {
+    ) -> u64 {
         self.cwnd = cwnd;
         self.rtt = rtt_sample;
         // Do nothing when data limited to avoid having insufficient data
@@ -239,7 +230,7 @@ impl OwnResume {
         match self.cr_state {
             CrState::Reconnaissance => {
                 //self.jump_cwnd = (self.saved_cwnd / 2).saturating_sub(cwnd);
-                self.jump_cwnd = cmp::max(MAX_JUMP, self.saved_cwnd / 2); //--> this _would_ be correct following the draft, but it adds roughly 5s to flow completion?
+                self.jump_cwnd = self.saved_cwnd / 2; //--> this _would_ be correct following the draft, but it adds roughly 5s to flow completion?
                 println!("-----------jump is: {:?}----------", self.jump_cwnd);
                 if self.jump_cwnd == 0 {
                     self.change_state(CrState::Normal);
@@ -264,7 +255,7 @@ impl OwnResume {
                     );
                     self.change_state(CrState::Normal);
                 }
-                self.change_state(CrState::Unvalidated(largest_pkt_sent));
+                self.change_state(CrState::Unvalidated);
                 self.pipesize = cwnd;
                 return self.jump_cwnd;
             }
@@ -276,7 +267,7 @@ impl OwnResume {
     pub(crate) fn congestion_event(&mut self, largest_pkt_sent: u64) -> usize {
         println!("in congestion event!!");
         match self.cr_state {
-            CrState::Unvalidated(_) => {
+            CrState::Unvalidated => {
                 println!("congestion during unvalidated phase");
 
                 // TODO: mark used CR parameters as invalid for future connections
