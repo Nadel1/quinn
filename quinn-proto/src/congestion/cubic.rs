@@ -73,6 +73,7 @@ pub struct Cubic {
     cubic_state: State,
     current_mtu: u64,
     resume: resume::OwnResume,
+    pacing_rate: u64,
 }
 
 impl Cubic {
@@ -86,6 +87,7 @@ impl Cubic {
             cubic_state: Default::default(),
             current_mtu: current_mtu as u64,
             resume: resume::OwnResume::new(resume::SAVED_CC_FILE),
+            pacing_rate: 0,
         }
     }
 
@@ -116,11 +118,10 @@ impl Controller for Cubic {
             // Slow start
             //TODO: add changinging of cwnd with cr states
             if self.resume.enabled() {
+                println!("------------Careful resume is enabled!!!------------");
                 let cr_state = self.resume.get_state();
                 match cr_state {
-                    CrState::Unvalidated => {
-                        self.window = self.resume.get_jump_cwnd() as u64;
-                    }
+                    CrState::Unvalidated => {}
                     CrState::SafeRetreat(_) => {}
                     _ => {
                         self.window += bytes;
@@ -242,7 +243,7 @@ impl Controller for Cubic {
         super::ControllerMetrics {
             congestion_window: self.window(),
             ssthresh: Some(self.ssthresh),
-            pacing_rate: None,
+            pacing_rate: Some(self.pacing_rate),
         }
     }
 
@@ -264,6 +265,10 @@ impl Controller for Cubic {
 
     fn set_ssthresh(&self, new_ssthresh: Option<u64>) {
         todo!()
+    }
+
+    fn set_pacing_rate(&mut self, new_pacing_rate: u64) {
+        self.pacing_rate = new_pacing_rate;
     }
 }
 

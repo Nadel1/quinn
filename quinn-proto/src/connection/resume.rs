@@ -11,6 +11,8 @@ use std::path::Path;
 use tracing::trace;
 
 pub(crate) const SAVED_CC_FILE: &str = "saved_params.csv";
+pub(crate) const PACING_MULTIPLIER: f64 = 1.25;
+
 const PARAMS_MAXIMUM_GAP: Duration = Duration::from_secs(120 * 60);
 const MAX_JUMP: usize = 2000; //configured max cwnd
 
@@ -216,7 +218,7 @@ impl OwnResume {
         cwnd: u64,
         app_limited: bool,
         iw_acked: bool,
-    ) {
+    ) -> u64 {
         println!(
             "In send packet with {} iw_acked and {} app_limited",
             iw_acked, app_limited
@@ -226,19 +228,19 @@ impl OwnResume {
         // Do nothing when data limited to avoid having insufficient data
         // to be able to validate transmission at a higher rate
         if app_limited {
-            return; //self.saved_cwnd;
+            return cwnd; //self.saved_cwnd;
         }
         if !iw_acked {
-            return; //self.saved_cwnd;
+            return cwnd; //self.saved_cwnd;
         }
         match self.cr_state {
             CrState::Reconnaissance => {
                 //self.jump_cwnd = (self.saved_cwnd / 2).saturating_sub(cwnd);
-                self.jump_cwnd = self.saved_cwnd / 2; 
+                self.jump_cwnd = self.saved_cwnd / 2;
                 println!("-----------jump is: {:?}----------", self.jump_cwnd);
                 if self.jump_cwnd == 0 {
                     self.change_state(CrState::Normal);
-                    return;
+                    return cwnd;
                 }
                 //check rtt in recon: path changed or rtt too small?
                 let current_rtt = rtt_sample;
@@ -256,10 +258,10 @@ impl OwnResume {
                 }
                 self.change_state(CrState::Unvalidated);
                 self.pipesize = cwnd;
-                return;
+                return self.jump_cwnd;
             }
 
-            _ => return,
+            _ => return cwnd,
         }
     }
 

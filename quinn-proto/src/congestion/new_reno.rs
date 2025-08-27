@@ -20,6 +20,7 @@ pub struct NewReno {
     recovery_start_time: Instant,
     /// Bytes which had been acked by the peer since leaving slow start
     bytes_acked: u64,
+    pacing_rate: u64,
 }
 
 impl NewReno {
@@ -32,6 +33,7 @@ impl NewReno {
             current_mtu: current_mtu as u64,
             config,
             bytes_acked: 0,
+            pacing_rate: 0,
         }
     }
 
@@ -138,6 +140,9 @@ impl Controller for NewReno {
 
     fn set_ssthresh(&self, new_ssthresh: Option<u64>) {
         todo!();
+    }
+    fn set_pacing_rate(&mut self, new_pacing_rate: u64) {
+        self.pacing_rate = new_pacing_rate;
     }
 }
 

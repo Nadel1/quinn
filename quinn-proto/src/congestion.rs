@@ -86,6 +86,7 @@ pub trait Controller: Send + Sync {
     /// methods used by careful resume to change the cwnd and ssthresh accordingly
     fn set_cwnd(&mut self, new_window: u64);
     fn set_ssthresh(&self, new_ssthresh: Option<u64>);
+    fn set_pacing_rate(&mut self, new_pacing_rate: u64);
 }
 
 /// Common congestion controller metrics

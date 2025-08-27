@@ -391,7 +391,9 @@ impl Controller for Bbr {
         self.max_sent_packet_number = last_packet_number;
         self.max_bandwidth.on_sent(now, bytes);
     }
-
+    fn set_pacing_rate(&mut self, new_pacing_rate: u64) {
+        self.pacing_rate = new_pacing_rate;
+    }
     fn on_ack(
         &mut self,
         now: Instant,
