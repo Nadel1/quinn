@@ -13,7 +13,6 @@ use crate::{Duration, Instant};
 /// These are recommended value in RFC8312.
 const BETA_CUBIC: f64 = 0.7;
 
-
 const C: f64 = 0.4;
 
 /// CUBIC State Variables.
@@ -285,11 +284,11 @@ impl Controller for Cubic {
     fn into_any(self: Box<Self>) -> Box<dyn Any> {
         self
     }
-    
-    fn set_cwnd(&self, new_window: u64) {
-        todo!()
+
+    fn set_cwnd(&mut self, new_window: u64) {
+        self.window = new_window;
     }
-    
+
     fn set_ssthresh(&self, new_ssthresh: Option<u64>) {
         todo!()
     }

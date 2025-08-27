@@ -249,6 +249,7 @@ pub struct Connection {
 
     // Careful resume
     resume: resume::OwnResume,
+    total_acked: u64,
 }
 
 impl Connection {
@@ -367,6 +368,7 @@ impl Connection {
             stats: ConnectionStats::default(),
             version,
             resume: resume::OwnResume::new(resume::SAVED_CC_FILE),
+            total_acked: 0,
         };
         if path_validated {
             this.on_path_validated();
@@ -1489,8 +1491,6 @@ impl Connection {
         if ack.largest >= self.spaces[space].next_packet_number {
             return Err(TransportError::PROTOCOL_VIOLATION("unsent packet acked"));
         }
-        let bytes_acked = self.total_authed_packets;
-        let iw_acked = bytes_acked >= self.path.congestion.initial_window();
 
         let new_largest = {
             let space = &mut self.spaces[space];
@@ -1499,6 +1499,7 @@ impl Connection {
                 .map_or(true, |pn| ack.largest > pn)
             {
                 space.largest_acked_packet = Some(ack.largest);
+                self.total_acked += space.largest_acked_packet.unwrap();
                 if let Some(info) = space.sent_packets.get(&ack.largest) {
                     // This should always succeed, but a misbehaving peer might ACK a packet we
                     // haven't sent. At worst, that will result in us spuriously reducing the
@@ -1510,6 +1511,15 @@ impl Connection {
                 false
             }
         };
+        let bytes_acked = self.total_acked;
+
+        let iw_acked = self.total_acked >= self.path.congestion.initial_window();
+        println!(
+            "total acked_bytes is {:} and initial_window is {:} and iw_acked is {:}",
+            self.total_acked,
+            self.path.congestion.initial_window(),
+            iw_acked
+        );
         if self.resume.enabled() {
             let (new_cwnd, new_ssthresh) =
                 self.resume
