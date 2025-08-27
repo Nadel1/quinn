@@ -131,6 +131,14 @@ impl Controller for NewReno {
     fn into_any(self: Box<Self>) -> Box<dyn Any> {
         self
     }
+    
+    fn set_cwnd(&self, new_window: u64) {
+        todo!()
+    }
+    
+    fn set_ssthresh(&self, new_ssthresh: Option<u64>) {
+        todo!()
+    }
 }
 
 /// Configuration for the `NewReno` congestion controller

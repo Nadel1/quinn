@@ -2,18 +2,17 @@ use std::any::Any;
 use std::cmp;
 use std::sync::Arc;
 
-
-
 use super::{BASE_DATAGRAM_SIZE, Controller, ControllerFactory};
 use crate::connection::RttEstimator;
-use crate::resume::{self, CrState};
+use crate::connection::resume;
+use crate::connection::resume::CrState;
 use crate::{Duration, Instant};
 
 /// CUBIC Constants.
 ///
 /// These are recommended value in RFC8312.
 const BETA_CUBIC: f64 = 0.7;
-const SAVED_CC_FILE: &str = "saved_params_quinn.csv";
+
 
 const C: f64 = 0.4;
 
@@ -87,7 +86,7 @@ impl Cubic {
             config,
             cubic_state: Default::default(),
             current_mtu: current_mtu as u64,
-            resume: resume::OwnResume::new(SAVED_CC_FILE),
+            resume: resume::OwnResume::new(resume::SAVED_CC_FILE),
         }
     }
 
@@ -120,7 +119,9 @@ impl Controller for Cubic {
             if self.resume.enabled() {
                 let cr_state = self.resume.get_state();
                 match cr_state {
-                    CrState::Unvalidated(_) => {}
+                    CrState::Unvalidated => {
+                        self.window = self.resume.get_jump_cwnd() as u64;
+                    }
                     CrState::SafeRetreat(_) => {}
                     _ => {
                         self.window += bytes;
@@ -256,6 +257,14 @@ impl Controller for Cubic {
 
     fn into_any(self: Box<Self>) -> Box<dyn Any> {
         self
+    }
+    
+    fn set_cwnd(&self, new_window: u64) {
+        todo!()
+    }
+    
+    fn set_ssthresh(&self, new_ssthresh: Option<u64>) {
+        todo!()
     }
 }
 

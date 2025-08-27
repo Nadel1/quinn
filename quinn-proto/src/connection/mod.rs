@@ -91,6 +91,8 @@ mod timer;
 use crate::congestion::Controller;
 use timer::{Timer, TimerTable};
 
+pub(crate) mod resume;
+
 /// Protocol state and logic for a single QUIC connection
 ///
 /// Objects of this type receive [`ConnectionEvent`]s and emit [`EndpointEvent`]s and application
@@ -238,6 +240,9 @@ pub struct Connection {
     stats: ConnectionStats,
     /// QUIC version used for the connection.
     version: u32,
+
+    // Careful resume
+    resume: resume::OwnResume,
 }
 
 impl Connection {
@@ -355,7 +360,9 @@ impl Connection {
             rng,
             stats: ConnectionStats::default(),
             version,
+            resume: resume::OwnResume::new(resume::SAVED_CC_FILE),
         };
+        let resume = resume::OwnResume::new(resume::SAVED_CC_FILE);
         if path_validated {
             this.on_path_validated();
         }
@@ -1437,6 +1444,9 @@ impl Connection {
         if ack.largest >= self.spaces[space].next_packet_number {
             return Err(TransportError::PROTOCOL_VIOLATION("unsent packet acked"));
         }
+        let bytes_acked = self.total_authed_packets;
+        let iw_acked = bytes_acked >= self.path.congestion.initial_window();
+
         let new_largest = {
             let space = &mut self.spaces[space];
             if space
@@ -1455,6 +1465,17 @@ impl Connection {
                 false
             }
         };
+        if self.resume.enabled() {
+            let (new_cwnd, new_ssthresh) =
+                self.resume
+                    .process_ack(ack.largest, ack.largest, self.path.in_flight.bytes);
+            if let Some(new_cwnd) = new_cwnd {
+                self.path.congestion.set_cwnd(new_cwnd);
+            }
+            if let Some(new_ssthresh) = new_ssthresh {
+                self.path.congestion.set_ssthresh(Some(new_ssthresh));
+            }
+        }
 
         // Avoid DoS from unreasonably huge ack ranges by filtering out just the new acks.
         let mut newly_acked = ArrayRangeSet::new();
