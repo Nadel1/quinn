@@ -2,9 +2,14 @@ use std::{
     cmp,
     collections::VecDeque,
     convert::TryFrom,
-    fmt, io, mem,
+    fmt,
+    fs::File,
+    io::{self},
+    mem,
     net::{IpAddr, SocketAddr},
+    path::Path,
     sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use bytes::{Bytes, BytesMut};
@@ -363,7 +368,6 @@ impl Connection {
             version,
             resume: resume::OwnResume::new(resume::SAVED_CC_FILE),
         };
-        let resume = resume::OwnResume::new(resume::SAVED_CC_FILE);
         if path_validated {
             this.on_path_validated();
         }
@@ -1440,6 +1444,41 @@ impl Connection {
             self.spaces[SpaceId::Data].pending.max_data = true;
         }
     }
+    fn calculate_saved_params(&mut self) {
+        //rtt as low as possible, cwnd as high as  possible
+
+        if Path::new(resume::SAVED_CC_FILE).exists() {
+            let mut saved_cwnd = self.resume.get_saved_cwnd();
+            let mut saved_rtt = self.resume.get_saved_rtt();
+
+            if saved_rtt > self.rtt().as_secs() {
+                saved_rtt = self.rtt().as_secs();
+            }
+
+            if saved_cwnd < self.path.congestion.window() as f64 {
+                saved_cwnd = self.path.congestion.window() as f64;
+            }
+            if saved_cwnd > (4 * self.path.congestion.initial_window()) as f64 {
+                self.write_params_to_file(saved_rtt, saved_cwnd as usize);
+            }
+        } else {
+            File::create(resume::SAVED_CC_FILE).unwrap();
+        }
+    }
+    fn write_params_to_file(&mut self, saved_rtt: u64, saved_cwnd: usize) {
+        use std::io::Write; //this is specifically imported here and not in the beginning (yes i know, looks ugly), because other writes will be unsure which import to use otherwise
+        let mut file = File::create(resume::SAVED_CC_FILE).unwrap();
+        let mut save_string = "SAVED_RTT,".to_owned();
+        save_string.push_str(&saved_rtt.to_string());
+        save_string.push_str(",SAVED_CWND,");
+        save_string.push_str(&saved_cwnd.to_string());
+        save_string.push_str(",timestamp,");
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH);
+        save_string.push_str(&timestamp.unwrap().as_secs().to_string());
+
+        println!("Saving: {}", save_string);
+        let _ = file.write_all(save_string.as_bytes());
+    }
 
     fn on_ack_received(
         &mut self,
@@ -1550,6 +1589,20 @@ impl Connection {
                 self.path.first_packet_after_rtt_sample =
                     Some((space, self.spaces[space].next_packet_number));
             }
+            if self.resume.enabled() {
+                self.resume.send_packet(
+                    self.path.rtt.get(),
+                    self.path.congestion.window(),
+                    self.app_limited,
+                    iw_acked,
+                );
+            }
+        }
+        match self.resume.get_state() {
+            resume::CrState::Normal => {
+                self.calculate_saved_params();
+            }
+            _ => {}
         }
 
         // Must be called before crypto/pto_count are clobbered

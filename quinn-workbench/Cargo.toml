@@ -1,0 +1,31 @@
+[package]
+name = "quinn-workbench"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.86"
+bon = "3.3.0"
+clap = { version = "4", features = ["derive"] }
+console = "0.15.11"
+fastrand = { version = "2.1.0" }
+futures-util = "0.3.31"
+parking_lot = "0.12.3"
+pcap-file = "2.0.0"
+pnet_packet = "0.34.0"
+quinn = { path = "../quinn" }
+quinn-proto = { path = "../quinn-proto" }
+rcgen = "0.13.1"
+rustls = { version = "0.23.8", default-features = false, features = ["ring"] }
+serde = "1.0.203"
+serde_json = "1.0.117"
+serde_with = "3.11.0"
+similar = { version = "2.7.0", features = ["inline"] }
+tokio = { version = "1.37.0", features = ["rt","rt-multi-thread","sync","test-util", "macros"] }
+tokio-util = "0.7.13"
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+uuid = { version = "1.11.0" }
+url = "2.5.4"
+directories-next = "2.0.0"
+rustls-pemfile = "2.2.0"
