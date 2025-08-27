@@ -217,6 +217,10 @@ impl OwnResume {
         app_limited: bool,
         iw_acked: bool,
     ) {
+        println!(
+            "In send packet with {} iw_acked and {} app_limited",
+            iw_acked, app_limited
+        );
         self.cwnd = cwnd;
         self.rtt = rtt_sample;
         // Do nothing when data limited to avoid having insufficient data
@@ -230,7 +234,7 @@ impl OwnResume {
         match self.cr_state {
             CrState::Reconnaissance => {
                 //self.jump_cwnd = (self.saved_cwnd / 2).saturating_sub(cwnd);
-                self.jump_cwnd = self.saved_cwnd / 2; //--> this _would_ be correct following the draft, but it adds roughly 5s to flow completion?
+                self.jump_cwnd = self.saved_cwnd / 2; 
                 println!("-----------jump is: {:?}----------", self.jump_cwnd);
                 if self.jump_cwnd == 0 {
                     self.change_state(CrState::Normal);
