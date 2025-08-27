@@ -38,7 +38,7 @@ pub(crate) struct OwnResume {
     pub total_acked: u64,
     time_in_state: Instant, //make sure we dont stay in unvalidated phase longer than one rtt
     cwnd: u64,
-    rtt: Option<Duration>,
+    rtt: Duration,
 }
 
 impl std::fmt::Debug for OwnResume {
@@ -108,7 +108,7 @@ impl OwnResume {
             jump_cwnd: 0,
             pipesize: 0,
             total_acked: 0,
-            rtt: Some(Duration::ZERO),
+            rtt: Duration::ZERO,
             cwnd: 0,
         }
     }
@@ -212,20 +212,20 @@ impl OwnResume {
     //returns cwnd
     pub(crate) fn send_packet(
         &mut self,
-        rtt_sample: Option<Duration>,
+        rtt_sample: Duration,
         cwnd: u64,
         app_limited: bool,
         iw_acked: bool,
-    ) -> u64 {
+    ) {
         self.cwnd = cwnd;
         self.rtt = rtt_sample;
         // Do nothing when data limited to avoid having insufficient data
         // to be able to validate transmission at a higher rate
         if app_limited {
-            return 0; //self.saved_cwnd;
+            return; //self.saved_cwnd;
         }
         if !iw_acked {
-            return 0; //self.saved_cwnd;
+            return; //self.saved_cwnd;
         }
         match self.cr_state {
             CrState::Reconnaissance => {
@@ -234,16 +234,11 @@ impl OwnResume {
                 println!("-----------jump is: {:?}----------", self.jump_cwnd);
                 if self.jump_cwnd == 0 {
                     self.change_state(CrState::Normal);
-                    return 0;
+                    return;
                 }
                 //check rtt in recon: path changed or rtt too small?
-                let current_rtt = match rtt_sample {
-                    Some(s) => s,
-                    None => {
-                        // Don't make any decisions until we have an RTT sample
-                        return cwnd;
-                    }
-                };
+                let current_rtt = rtt_sample;
+
                 // Confirm RTT is similar to that of the saved connection
                 if current_rtt <= self.saved_rtt / 2 || current_rtt >= self.saved_rtt * 10
                 // this is arbitrary, but seems to make somewhat sense
@@ -257,10 +252,10 @@ impl OwnResume {
                 }
                 self.change_state(CrState::Unvalidated);
                 self.pipesize = cwnd;
-                return self.jump_cwnd;
+                return;
             }
 
-            _ => return 0,
+            _ => return,
         }
     }
 
