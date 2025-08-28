@@ -1527,7 +1527,7 @@ impl Connection {
         };
         let bytes_acked = self.resume.total_acked;
 
-        let iw_acked = bytes_acked >= self.path.congestion.initial_window()/1200;
+        let iw_acked = bytes_acked >= self.path.congestion.initial_window() / 1200;
         println!(
             "total acked_bytes is {:} and initial_window is {:} and iw_acked is {:}",
             bytes_acked,
@@ -1620,6 +1620,12 @@ impl Connection {
                     }
                 }
                 resume::CrState::Unvalidated => {
+                    //dont stay in unvalidated state longer than one rtt
+                    let now = Instant::now();
+                    if now - self.resume.get_state_timer() > self.rtt() {
+                        self.resume
+                            .change_state(resume::CrState::Validating(ack.largest));
+                    }
                     if !self.path.rtt.get().is_zero() {
                         //see page 19 of https://datatracker.ietf.org/doc/draft-ietf-tsvwg-careful-resume/
                         let inter_transmission_time: f64 = (self.path.rtt.get().as_secs_f64()
@@ -1928,6 +1934,15 @@ impl Connection {
                 );
             }
 
+            if self.resume.enabled() {
+                let new_cwnd = self.resume.congestion_event(largest_lost);
+                if new_cwnd != 0 {
+                    self.path.congestion.set_cwnd(cmp::max(
+                        new_cwnd as u64,
+                        self.path.congestion.initial_window(),
+                    ));
+                }
+            }
             if self.path.mtud.black_hole_detected(now) {
                 self.stats.path.black_holes_detected += 1;
                 self.path
