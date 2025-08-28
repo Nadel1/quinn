@@ -15,6 +15,7 @@ pub(crate) struct BandwidthEstimation {
     prev_sent_time: Option<Instant>,
     max_filter: MinMax,
     acked_at_last_window: u64,
+    pub(crate) bandwidth: u64,
 }
 
 impl BandwidthEstimation {
@@ -61,9 +62,9 @@ impl BandwidthEstimation {
             None => 0,
         };
 
-        let bandwidth = send_rate.min(ack_rate);
-        if !app_limited && self.max_filter.get() < bandwidth {
-            self.max_filter.update_max(round, bandwidth);
+        self.bandwidth = send_rate.min(ack_rate);
+        if !app_limited && self.max_filter.get() < self.bandwidth {
+            self.max_filter.update_max(round, self.bandwidth);
         }
     }
 
