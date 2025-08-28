@@ -14,11 +14,10 @@ pub(crate) const SAVED_CC_FILE: &str = "saved_params.csv";
 pub(crate) const PACING_MULTIPLIER: f64 = 1.25;
 
 const PARAMS_MAXIMUM_GAP: Duration = Duration::from_secs(120 * 60);
-const MAX_JUMP: usize = 2000; //configured max cwnd
 
 // No observe state as that always applies to the saved connection and never the current connection
 #[derive(Default, Debug, Copy, Clone, Eq, PartialEq)]
-pub enum CrState {
+pub(crate) enum CrState {
     #[default]
     Reconnaissance,
     // The next two states store the first packet sent when entering that state
@@ -133,9 +132,6 @@ impl OwnResume {
     pub(crate) fn get_state(&self) -> CrState {
         self.cr_state
     }
-    pub(crate) fn get_pipesize(&self) -> u64 {
-        self.pipesize
-    }
 
     pub(crate) fn get_saved_rtt(&self) -> u64 {
         self.saved_rtt.as_secs() as u64
@@ -153,8 +149,8 @@ impl OwnResume {
         self.jump_cwnd
     }
 
-    fn update_state_timer(&mut self) {
-        self.time_in_state = Instant::now()
+    pub(crate) fn get_state_timer(&mut self) -> Instant {
+        self.time_in_state
     }
     // Returns (new_cwnd, new_ssthresh), both optional
     pub(crate) fn process_ack(
@@ -257,6 +253,7 @@ impl OwnResume {
                     self.change_state(CrState::Normal);
                 }
                 self.change_state(CrState::Unvalidated);
+                self.time_in_state = Instant::now();
                 self.pipesize = cwnd;
                 return self.jump_cwnd;
             }

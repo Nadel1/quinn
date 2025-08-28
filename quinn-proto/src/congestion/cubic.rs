@@ -263,8 +263,8 @@ impl Controller for Cubic {
         self.window = new_window;
     }
 
-    fn set_ssthresh(&self, new_ssthresh: Option<u64>) {
-        todo!()
+    fn set_ssthresh(&mut self, new_ssthresh: Option<u64>) {
+        self.ssthresh = new_ssthresh.unwrap();
     }
 
     fn set_pacing_rate(&mut self, new_pacing_rate: u64) {

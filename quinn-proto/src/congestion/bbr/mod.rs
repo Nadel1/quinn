@@ -512,7 +512,7 @@ impl Controller for Bbr {
         self.cwnd = new_window;
     }
 
-    fn set_ssthresh(&self, new_ssthresh: Option<u64>) {
+    fn set_ssthresh(&mut self, _new_ssthresh: Option<u64>) {
         todo!()
     }
 }
