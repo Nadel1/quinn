@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::cmp;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -8,6 +9,8 @@ use crate::congestion::ControllerMetrics;
 use crate::congestion::bbr::bw_estimation::BandwidthEstimation;
 use crate::congestion::bbr::min_max::MinMax;
 use crate::connection::RttEstimator;
+use crate::connection::resume;
+use crate::connection::resume::CrState;
 use crate::{Duration, Instant};
 
 use super::{BASE_DATAGRAM_SIZE, Controller, ControllerFactory};
@@ -57,6 +60,10 @@ pub struct Bbr {
     round_wo_bw_gain: u64,
     ack_aggregation: AckAggregationState,
     random_number_generator: rand::rngs::StdRng,
+    probing_rate: u64,
+    carefully_resuming: bool,
+    resume: resume::OwnResume,
+    round_counter_cr: u64,
 }
 
 impl Bbr {
@@ -98,6 +105,10 @@ impl Bbr {
             round_wo_bw_gain: 0,
             ack_aggregation: AckAggregationState::default(),
             random_number_generator: rand::rngs::StdRng::from_os_rng(),
+            carefully_resuming: false,
+            resume: resume::OwnResume::new(resume::SAVED_CC_FILE),
+            probing_rate: 0,
+            round_counter_cr: 0,
         }
     }
 
@@ -436,6 +447,19 @@ impl Controller for Bbr {
             if is_round_start {
                 self.current_round_trip_end_packet_number = self.max_sent_packet_number;
                 self.round_count += 1;
+                if self.carefully_resuming && self.round_count - self.round_counter_cr > 2 {
+                    self.carefully_resuming = false; //reset carefully resuming flag after two rounds
+                }
+                if self.resume.enabled() {
+                    println!("----------resume is enabled----------");
+                    self.carefully_resuming = true;
+                    self.probing_rate = 0.5 as u64 * self.max_bandwidth.bandwidth;
+                    let nominal_pacing_rate =
+                        self.max_bandwidth.bandwidth * self.pacing_gain as u64;
+
+                    self.set_pacing_rate(cmp::max(nominal_pacing_rate, self.probing_rate));
+                    self.round_counter_cr = self.round_count;
+                }
             }
         }
 
@@ -470,6 +494,10 @@ impl Controller for Bbr {
         lost_bytes: u64,
     ) {
         self.loss_state.lost_bytes += lost_bytes;
+        if self.carefully_resuming && self.mode == Mode::Startup {
+            self.mode = Mode::Drain; //change to drain if mode is startup and carefully resuming is on
+            self.carefully_resuming = false;
+        }
     }
 
     fn on_mtu_update(&mut self, new_mtu: u16) {
