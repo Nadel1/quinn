@@ -1506,6 +1506,20 @@ impl Connection {
                     // congestion window.
                     space.largest_acked_packet_sent = info.time_sent;
                 }
+                if self.resume.enabled() {
+                    let (new_cwnd, new_ssthresh) = self.resume.process_ack(
+                        space.largest_ack_eliciting_sent,
+                        space.largest_acked_packet.unwrap(),
+                        self.path.in_flight.bytes,
+                    );
+                    if let Some(new_cwnd) = new_cwnd {
+                        self.path.congestion.set_cwnd(new_cwnd);
+                    }
+                    if let Some(new_ssthresh) = new_ssthresh {
+                        self.path.congestion.set_ssthresh(Some(new_ssthresh));
+                    }
+                }
+
                 true
             } else {
                 false
@@ -1513,24 +1527,13 @@ impl Connection {
         };
         let bytes_acked = self.resume.total_acked;
 
-        let iw_acked = bytes_acked >= self.path.congestion.initial_window();
+        let iw_acked = bytes_acked >= self.path.congestion.initial_window()/1200;
         println!(
             "total acked_bytes is {:} and initial_window is {:} and iw_acked is {:}",
             bytes_acked,
             self.path.congestion.initial_window(),
             iw_acked
         );
-        if self.resume.enabled() {
-            let (new_cwnd, new_ssthresh) =
-                self.resume
-                    .process_ack(ack.largest, ack.largest, self.path.in_flight.bytes);
-            if let Some(new_cwnd) = new_cwnd {
-                self.path.congestion.set_cwnd(new_cwnd);
-            }
-            if let Some(new_ssthresh) = new_ssthresh {
-                self.path.congestion.set_ssthresh(Some(new_ssthresh));
-            }
-        }
 
         if self.detect_spurious_loss(&ack, space) {
             self.path.congestion.on_spurious_congestion_event();
