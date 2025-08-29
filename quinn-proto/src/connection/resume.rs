@@ -281,7 +281,7 @@ impl OwnResume {
         }
     }
 
-    pub(crate) fn congestion_event(&mut self, largest_pkt_sent: u64) -> usize {
+    pub(crate) fn congestion_event(&mut self, largest_pkt_sent: u64) -> u64 {
         println!("in congestion event!!");
         match self.cr_state {
             CrState::Unvalidated => {
@@ -297,7 +297,7 @@ impl OwnResume {
                 //    self.pipesize / 2
 
                 self.change_state(CrState::SafeRetreat(largest_pkt_sent));
-                0
+                self.pipesize / 2
             }
             CrState::Validating(_) => {
                 println!("congestion during validating phase");

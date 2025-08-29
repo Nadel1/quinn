@@ -1639,7 +1639,7 @@ impl Connection {
                     if !self.path.rtt.get().is_zero() {
                         //see page 19 of https://datatracker.ietf.org/doc/draft-ietf-tsvwg-careful-resume/
                         let inter_transmission_time: f64 = (self.path.rtt.get().as_secs_f64()
-                            * 1200 as f64)
+                            * self.datagrams().max_size().unwrap() as f64)
                             / self.resume.get_jump_cwnd() as f64;
 
                         self.path
