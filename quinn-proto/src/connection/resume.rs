@@ -149,11 +149,26 @@ impl OwnResume {
         self.jump_cwnd
     }
 
-    pub fn set_saved_rtt(&mut self, new_rtt: u64) {
+    pub(crate) fn set_saved_rtt(&mut self, new_rtt: u64) {
         self.saved_rtt = Duration::from_secs(new_rtt)
     }
     pub(crate) fn get_state_timer(&mut self) -> Instant {
         self.time_in_state
+    }
+
+    pub(crate) fn check_flight_size(
+        &mut self,
+        flight_size: u64,
+        initial_window: u64,
+        first_packet: u64,
+    ) -> u64 {
+        if flight_size < initial_window || flight_size <= self.pipesize {
+            self.change_state(CrState::Normal);
+            return self.pipesize;
+        } else {
+            self.change_state(CrState::Validating(first_packet));
+            return flight_size;
+        }
     }
     // Returns (new_cwnd, new_ssthresh), both optional
     pub(crate) fn process_ack(
@@ -235,12 +250,7 @@ impl OwnResume {
         match self.cr_state {
             CrState::Reconnaissance => {
                 //self.jump_cwnd = (self.saved_cwnd / 2).saturating_sub(cwnd);
-                self.jump_cwnd = self.saved_cwnd / 2;
-                println!("-----------jump is: {:?}----------", self.jump_cwnd);
-                if self.jump_cwnd == 0 {
-                    self.change_state(CrState::Normal);
-                    return cwnd;
-                }
+
                 //check rtt in recon: path changed or rtt too small?
                 let current_rtt = rtt_sample;
 
@@ -258,6 +268,12 @@ impl OwnResume {
                 self.change_state(CrState::Unvalidated);
                 self.time_in_state = Instant::now();
                 self.pipesize = cwnd;
+                self.jump_cwnd = self.saved_cwnd / 2;
+                println!("-----------jump is: {:?}----------", self.jump_cwnd);
+                if self.jump_cwnd == 0 {
+                    self.change_state(CrState::Normal);
+                    return cwnd;
+                }
                 return self.jump_cwnd;
             }
 
