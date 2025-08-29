@@ -1410,6 +1410,18 @@ impl Connection {
     /// faster or reduce loss to settle on optimal values by restarting from the initial
     /// configuration in the [`TransportConfig`].
     pub fn path_changed(&mut self, now: Instant) {
+        if self.resume.enabled() {
+            let cr_state = self.resume.get_state();
+            match cr_state {
+                resume::CrState::Reconnaissance => {
+                    self.resume.change_state(resume::CrState::Normal);
+                }
+                resume::CrState::Unvalidated => {
+                    self.resume.change_state(resume::CrState::Normal);
+                }
+                _ => {}
+            }
+        }
         self.path.reset(now, &self.config);
     }
 
@@ -1613,10 +1625,17 @@ impl Connection {
                 resume::CrState::Unvalidated => {
                     //dont stay in unvalidated state longer than one rtt
                     let now = Instant::now();
-                    if now - self.resume.get_state_timer() > self.rtt() {
-                        self.resume
-                            .change_state(resume::CrState::Validating(ack.largest));
+                    if now - self.resume.get_state_timer() > self.rtt()
+                        || self.path.in_flight.bytes >= self.path.congestion.window()
+                    {
+                        let new_cwnd = self.resume.check_flight_size(
+                            self.path.in_flight.bytes,
+                            self.path.congestion.initial_window(),
+                            ack.largest,
+                        );
+                        self.path.congestion.set_cwnd(new_cwnd);
                     }
+
                     if !self.path.rtt.get().is_zero() {
                         //see page 19 of https://datatracker.ietf.org/doc/draft-ietf-tsvwg-careful-resume/
                         let inter_transmission_time: f64 = (self.path.rtt.get().as_secs_f64()

@@ -116,7 +116,6 @@ impl Controller for Cubic {
 
         if self.window < self.ssthresh {
             // Slow start
-            //TODO: add changinging of cwnd with cr states
             if self.resume.enabled() {
                 println!("------------Careful resume is enabled!!!------------");
                 let cr_state = self.resume.get_state();
