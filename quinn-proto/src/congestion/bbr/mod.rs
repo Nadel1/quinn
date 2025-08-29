@@ -317,14 +317,34 @@ impl Bbr {
             return;
         }
         let mut target_window = self.get_target_cwnd(self.cwnd_gain);
-        if self.is_at_full_bandwidth {
-            // Add the max recently measured ack aggregation to CWND.
-            target_window += self.ack_aggregation.max_ack_height.get();
+        if self.resume.enabled() {
+            let cr_state = self.resume.get_state();
+            println!("-----in calculate cwnd for bbr!-----");
+            match cr_state {
+                resume::CrState::Unvalidated => {}
+                resume::CrState::SafeRetreat(_) => {}
+                _ => {
+                    if self.is_at_full_bandwidth {
+                        // Add the max recently measured ack aggregation to CWND.
+                        target_window += self.ack_aggregation.max_ack_height.get();
+                    } else {
+                        // Add the most recent excess acked.  Because CWND never decreases in
+                        // STARTUP, this will automatically create a very localized max filter.
+                        target_window += excess_acked;
+                    }
+                }
+            }
         } else {
-            // Add the most recent excess acked.  Because CWND never decreases in
-            // STARTUP, this will automatically create a very localized max filter.
-            target_window += excess_acked;
+            if self.is_at_full_bandwidth {
+                // Add the max recently measured ack aggregation to CWND.
+                target_window += self.ack_aggregation.max_ack_height.get();
+            } else {
+                // Add the most recent excess acked.  Because CWND never decreases in
+                // STARTUP, this will automatically create a very localized max filter.
+                target_window += excess_acked;
+            }
         }
+
         // Instead of immediately setting the target CWND as the new one, BBR grows
         // the CWND towards |target_window| by only increasing it |bytes_acked| at a
         // time.
