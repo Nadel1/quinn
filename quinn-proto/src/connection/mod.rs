@@ -1455,6 +1455,7 @@ impl Connection {
 
             if saved_rtt > self.rtt().as_secs() {
                 saved_rtt = self.rtt().as_secs();
+                self.resume.set_saved_rtt(saved_rtt);
             }
 
             if saved_cwnd < self.path.congestion.window() as f64 {

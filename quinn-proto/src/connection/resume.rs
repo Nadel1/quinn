@@ -149,6 +149,9 @@ impl OwnResume {
         self.jump_cwnd
     }
 
+    pub fn set_saved_rtt(&mut self, new_rtt: u64) {
+        self.saved_rtt = Duration::from_secs(new_rtt)
+    }
     pub(crate) fn get_state_timer(&mut self) -> Instant {
         self.time_in_state
     }
