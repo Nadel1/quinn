@@ -81,6 +81,9 @@ struct Opt {
     /// bbr recommended value: `min(10 * max_datagram_size, max(2 * max_datagram_size, 14720))`
     #[clap(long = "initial-cwnd", default_value = "12000")]
     initial_cwnd: u64,
+
+    #[clap(long = "logging-file", default_value = "client.csv")]
+    logging_name: String,
 }
 
 #[allow(unused)]
@@ -146,6 +149,7 @@ async fn run(options: Opt) -> Result<()> {
     let initial_rtt = options.initial_rtt;
     let idle_timeout = options.idle_timeout;
     let requests = options.requests;
+    let logging_name=options.logging_name;
     let mut ack_freq = AckFrequencyConfig::default();
 
     let threshold = VarInt::from_u32(options.ack_eliciting_threshold);
@@ -155,7 +159,9 @@ async fn run(options: Opt) -> Result<()> {
         .initial_rtt(Duration::from_millis(initial_rtt))
         .max_idle_timeout(Some(
             Duration::from_millis(idle_timeout).try_into().unwrap(),
-        ));
+        ))
+        .logging_file(logging_name);
+
     transport_config.ack_frequency_config(Some(ack_freq));
     let mut ack_freq_config = quinn::AckFrequencyConfig::default();
     ack_freq_config.max_ack_delay(Some(Duration::from_millis(options.max_ack_delay)));

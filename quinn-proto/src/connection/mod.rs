@@ -250,6 +250,9 @@ pub struct Connection {
     // Careful resume
     resume: resume::OwnResume,
     total_acked: u64,
+
+    // own logging
+    logging_name: String,
 }
 
 impl Connection {
@@ -273,6 +276,7 @@ impl Connection {
         let path_validated = side_args.path_validated();
         let connection_side = ConnectionSide::from(side_args);
         let side = connection_side.side();
+        let logging_file = config.logging_file.clone();
         let initial_space = PacketSpace {
             crypto: Some(crypto.initial_keys(init_cid, side)),
             ..PacketSpace::new(now)
@@ -369,7 +373,16 @@ impl Connection {
             version,
             resume: resume::OwnResume::new(resume::SAVED_CC_FILE),
             total_acked: 0,
+            logging_name: logging_file,
         };
+        File::create(this.logging_name.clone()).unwrap();
+        use std::io::Write; //has to be included here, otherwise issues with other write calls
+        let mut file = File::options()
+            .append(true)
+            .open(this.logging_name.clone())
+            .unwrap();
+        let save_string = "TIMESTAMP,PACKET_NUM,PACKET_SIZE,CWND\n";
+        let _ = file.write_all(save_string.as_bytes());
         if path_validated {
             this.on_path_validated();
         }
@@ -419,6 +432,11 @@ impl Connection {
     #[must_use]
     pub fn poll_endpoint_events(&mut self) -> Option<EndpointEvent> {
         self.endpoint_events.pop_front().map(EndpointEvent)
+    }
+
+    /// Sets the log file name
+    pub fn set_log_name(&mut self, v: String) {
+        self.logging_name = v;
     }
 
     /// Provide control over streams
@@ -943,6 +961,7 @@ impl Connection {
                 .congestion
                 .on_sent(now, buf.len() as u64, last_packet_number);
 
+            self.write_to_log(last_packet_number, buf.len(), self.path.congestion.window());
             self.config.qlog_sink.emit_recovery_metrics(
                 self.pto_count,
                 &mut self.path,
@@ -1023,6 +1042,23 @@ impl Connection {
         })
     }
 
+    pub fn write_to_log(&self, pkt_num: u64, pkt_size: usize, cwnd: u64) {
+        use std::io::Write;
+        let mut file = File::options()
+            .append(true)
+            .open(self.config.logging_file.clone())
+            .unwrap();
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH);
+        let mut save_string = timestamp.unwrap().as_secs().to_string().to_owned();
+        save_string.push_str(",");
+        save_string.push_str(&pkt_num.to_string());
+        save_string.push_str(",");
+        save_string.push_str(&pkt_size.to_string());
+        save_string.push_str(",");
+        save_string.push_str(&cwnd.to_string());
+        save_string.push_str("\n");
+        let _ = file.write_all(save_string.as_bytes());
+    }
     /// Send PATH_CHALLENGE for a previous path if necessary
     fn send_path_challenge(&mut self, now: Instant, buf: &mut Vec<u8>) -> Option<Transmit> {
         let (prev_cid, prev_path) = self.prev_path.as_mut()?;
