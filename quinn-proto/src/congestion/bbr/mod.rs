@@ -10,7 +10,6 @@ use crate::congestion::bbr::bw_estimation::BandwidthEstimation;
 use crate::congestion::bbr::min_max::MinMax;
 use crate::connection::RttEstimator;
 use crate::connection::resume;
-use crate::connection::resume::CrState;
 use crate::{Duration, Instant};
 
 use super::{BASE_DATAGRAM_SIZE, Controller, ControllerFactory};
