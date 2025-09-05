@@ -68,6 +68,8 @@ struct Opt {
     /// bbr recommended value: `min(10 * max_datagram_size, max(2 * max_datagram_size, 14720))`
     #[clap(long = "initial-cwnd", default_value = "12000")]
     initial_cwnd: u64,
+    #[clap(long = "logging-file", default_value = "server.csv")]
+    logging_name: String,
 }
 
 fn main() {
