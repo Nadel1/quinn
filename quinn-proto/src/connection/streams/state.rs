@@ -120,7 +120,7 @@ pub struct StreamsState {
     /// Sum of current offsets of all send streams.
     pub(super) data_sent: u64,
     /// Sum of end offsets of all receive streams. Includes gaps, so it's an upper bound.
-    data_recvd: u64,
+    pub(crate) data_recvd: u64,
     /// Total quantity of unacknowledged outgoing data
     pub(super) unacked_data: u64,
     /// Configured upper bound for `unacked_data`

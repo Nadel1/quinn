@@ -54,6 +54,7 @@ impl Datagrams<'_> {
         }
         self.conn.datagrams.outgoing_total += data.len();
         self.conn.datagrams.outgoing.push_back(Datagram { data });
+
         Ok(())
     }
 
