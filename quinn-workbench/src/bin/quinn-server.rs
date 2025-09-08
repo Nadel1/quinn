@@ -157,12 +157,14 @@ async fn run(options: Opt) -> Result<()> {
     let mut transport_config = quinn::TransportConfig::default(); //Arc::get_mut(&mut server_config.transport).unwrap();
     let initial_rtt = options.initial_rtt;
     let idle_timeout = options.idle_timeout;
+    let logging_name=options.logging_name;
     transport_config
         .max_concurrent_uni_streams(0_u8.into())
         .initial_rtt(Duration::from_millis(initial_rtt))
         .max_idle_timeout(Some(
             Duration::from_millis(idle_timeout).try_into().unwrap(),
-        ));
+        ))
+        .logging_file(logging_name);
     let mut ack_freq = AckFrequencyConfig::default();
 
     let threshold = VarInt::from_u32(options.ack_eliciting_threshold);
