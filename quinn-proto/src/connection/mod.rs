@@ -2542,7 +2542,12 @@ impl Connection {
                         );
                     }
 
-                    self.write_to_log(number.unwrap(), data_size, 0, false);
+                    self.write_to_log(
+                        number.unwrap(),
+                        data_size,
+                        self.path.congestion.window(),
+                        false,
+                    );
                     self.process_decrypted_packet(now, remote, number, packet)
                 }
             }
