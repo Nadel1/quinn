@@ -381,7 +381,7 @@ impl Connection {
             .append(true)
             .open(this.logging_name.clone())
             .unwrap();
-        let save_string = "TIMESTAMP,PACKET_NUM,PACKET_SIZE,CWND\n";
+        let save_string = "TIMESTAMP,SENT/RECEIVED,PACKET_NUM,PACKET_SIZE,CWND\n";
         let _ = file.write_all(save_string.as_bytes());
         if path_validated {
             this.on_path_validated();
@@ -961,7 +961,12 @@ impl Connection {
                 .congestion
                 .on_sent(now, buf.len() as u64, last_packet_number);
 
-            self.write_to_log(last_packet_number, buf.len(), self.path.congestion.window());
+            self.write_to_log(
+                last_packet_number,
+                buf.len(),
+                self.path.congestion.window(),
+                true,
+            );
             self.config.qlog_sink.emit_recovery_metrics(
                 self.pto_count,
                 &mut self.path,
@@ -1042,7 +1047,7 @@ impl Connection {
         })
     }
 
-    pub fn write_to_log(&self, pkt_num: u64, pkt_size: usize, cwnd: u64) {
+    pub fn write_to_log(&self, pkt_num: u64, pkt_size: usize, cwnd: u64, sent: bool) {
         use std::io::Write;
         let mut file = File::options()
             .append(true)
@@ -1051,6 +1056,11 @@ impl Connection {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH);
         let mut save_string = timestamp.unwrap().as_secs().to_string().to_owned();
         save_string.push_str(",");
+        if sent {
+            save_string.push_str("SENT,");
+        } else {
+            save_string.push_str("RECEIVED,");
+        }
         save_string.push_str(&pkt_num.to_string());
         save_string.push_str(",");
         save_string.push_str(&pkt_size.to_string());
@@ -2471,13 +2481,21 @@ impl Connection {
         ecn: Option<EcnCodepoint>,
         partial_decode: PartialDecode,
     ) {
+        let data_size = partial_decode.len();
         if let Some(decoded) = packet_crypto::unprotect_header(
             partial_decode,
             &self.spaces,
             self.zero_rtt_crypto.as_ref(),
             self.peer_params.stateless_reset_token,
         ) {
-            self.handle_packet(now, remote, ecn, decoded.packet, decoded.stateless_reset);
+            self.handle_packet(
+                now,
+                remote,
+                ecn,
+                decoded.packet,
+                decoded.stateless_reset,
+                data_size,
+            );
         }
     }
 
@@ -2488,6 +2506,7 @@ impl Connection {
         ecn: Option<EcnCodepoint>,
         packet: Option<Packet>,
         stateless_reset: bool,
+        data_size: usize,
     ) {
         self.stats.udp_rx.ios += 1;
         if let Some(ref packet) = packet {
@@ -2582,6 +2601,7 @@ impl Connection {
                         );
                     }
 
+                    self.write_to_log(number.unwrap(), data_size, 0, false);
                     self.process_decrypted_packet(now, remote, number, packet)
                 }
             }
@@ -2963,8 +2983,9 @@ impl Connection {
         let mut close = None;
         let payload_len = payload.len();
         let mut ack_eliciting = false;
+
         for result in frame::Iter::new(payload)? {
-            let frame = result?;
+            let frame: Frame = result?;
             let span = match frame {
                 Frame::Padding => continue,
                 _ => Some(trace_span!("frame", ty = %frame.ty())),
@@ -3252,7 +3273,7 @@ impl Connection {
         }
 
         // Issue stream ID credit due to ACKs of outgoing finish/resets and incoming finish/resets
-        // on stopped streams. Incoming finishes/resets on open streams are not handled here as they
+        // on stopped streams. Incoming finishes/resets on open streamus are not handled here as they
         // are only freed, and hence only issue credit, once the application has been notified
         // during a read on the stream.
         let pending = &mut self.spaces[SpaceId::Data].pending;
