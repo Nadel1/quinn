@@ -374,14 +374,16 @@ impl Connection {
             total_acked: 0,
             logging_name: logging_file,
         };
-        File::create(this.logging_name.clone()).unwrap();
-        use std::io::Write; //has to be included here, otherwise issues with other write calls
-        let mut file = File::options()
-            .append(true)
-            .open(this.logging_name.clone())
-            .unwrap();
-        let save_string = "TIMESTAMP,SENT/RECEIVED,PACKET_NUM,PACKET_SIZE,CWND\n";
-        let _ = file.write_all(save_string.as_bytes());
+        if this.logging_name != "" {
+            File::create(this.logging_name.clone()).unwrap();
+            use std::io::Write; //has to be included here, otherwise issues with other write calls
+            let mut file = File::options()
+                .append(true)
+                .open(this.logging_name.clone())
+                .unwrap();
+            let save_string = "TIMESTAMP,SENT/RECEIVED,PACKET_NUM,PACKET_SIZE,CWND\n";
+            let _ = file.write_all(save_string.as_bytes());
+        }
         if path_validated {
             this.on_path_validated();
         }
@@ -1047,6 +1049,9 @@ impl Connection {
     }
 
     pub fn write_to_log(&self, pkt_num: u64, pkt_size: usize, cwnd: u64, sent: bool) {
+        if self.config.logging_file == "" {
+            return;
+        }
         use std::io::Write;
         let mut file = File::options()
             .append(true)
