@@ -518,7 +518,6 @@ impl Controller for Bbr {
             self.carefully_resuming = false;
         }
     }
-
     fn on_mtu_update(&mut self, new_mtu: u16) {
         self.current_mtu = new_mtu as u64;
         self.min_cwnd = calculate_min_window(self.current_mtu);
