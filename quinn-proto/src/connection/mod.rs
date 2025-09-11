@@ -382,7 +382,7 @@ impl Connection {
                 .append(true)
                 .open(this.logging_name.clone())
                 .unwrap();
-            let save_string = "TIMESTAMP,SENT/RECEIVED,PACKET_NUM,PACKET_SIZE,CWND\n";
+            let save_string = "TIMESTAMP,SENT/RECEIVED,PACKET_NUM,PACKET_SIZE,CWND,BYTES_IN_FLIGHT,RTT\n";
             let _ = file.write_all(save_string.as_bytes());
         }
         if path_validated {
@@ -968,6 +968,8 @@ impl Connection {
                 buf.len(),
                 self.path.congestion.window(),
                 true,
+                self.path.in_flight.bytes,
+                self.path.rtt.get().as_secs(),
             );
             self.config.qlog_sink.emit_recovery_metrics(
                 self.pto_count,
@@ -1049,7 +1051,15 @@ impl Connection {
         })
     }
 
-    pub fn write_to_log(&self, pkt_num: u64, pkt_size: usize, cwnd: u64, sent: bool) {
+    pub fn write_to_log(
+        &self,
+        pkt_num: u64,
+        pkt_size: usize,
+        cwnd: u64,
+        sent: bool,
+        bytes_in_flight: u64,
+        measured_rtt: u64,
+    ) {
         if self.config.logging_file == "" {
             return;
         }
@@ -1071,6 +1081,10 @@ impl Connection {
         save_string.push_str(&pkt_size.to_string());
         save_string.push_str(",");
         save_string.push_str(&cwnd.to_string());
+        save_string.push_str(",");
+        save_string.push_str(&bytes_in_flight.to_string());
+        save_string.push_str(",");
+        save_string.push_str(&measured_rtt.to_string());
         save_string.push_str("\n");
         let _ = file.write_all(save_string.as_bytes());
     }
@@ -2611,6 +2625,8 @@ impl Connection {
                         data_size,
                         self.path.congestion.window(),
                         false,
+                        self.path.in_flight.bytes,
+                        self.path.rtt.get().as_secs(),
                     );
                     self.process_decrypted_packet(now, remote, number, packet)
                 }
