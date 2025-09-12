@@ -382,7 +382,8 @@ impl Connection {
                 .append(true)
                 .open(this.logging_name.clone())
                 .unwrap();
-            let save_string = "TIMESTAMP,SENT/RECEIVED,PACKET_NUM,PACKET_SIZE,CWND,BYTES_IN_FLIGHT,RTT\n";
+            let save_string =
+                "TIMESTAMP,SENT/RECEIVED,PACKET_NUM,PACKET_SIZE,CWND,BYTES_IN_FLIGHT,RTT\n";
             let _ = file.write_all(save_string.as_bytes());
         }
         if path_validated {
@@ -1271,6 +1272,14 @@ impl Connection {
                         &mut self.path,
                         now,
                         self.orig_rem_cid,
+                    );
+                    self.write_to_log(
+                        0,
+                        0,
+                        self.path.congestion.window(),
+                        false,
+                        self.path.in_flight.bytes,
+                        self.path.rtt.get().as_secs(),
                     );
                 }
                 Timer::KeyDiscard => {
