@@ -526,12 +526,20 @@ impl Controller for Bbr {
     }
 
     fn window(&self) -> u64 {
-        if self.mode == Mode::ProbeRtt {
-            return self.get_probe_rtt_cwnd();
-        } else if self.recovery_state.in_recovery() && self.mode != Mode::Startup {
-            return self.cwnd.min(self.recovery_window);
+        if !self.carefully_resuming {
+            if self.mode == Mode::ProbeRtt {
+                return self.get_probe_rtt_cwnd();
+            } else if self.recovery_state.in_recovery() && self.mode != Mode::Startup {
+                return self.cwnd.min(self.recovery_window);
+            }
+            self.cwnd
+        } else {
+            if self.resume.safe_retreat {
+                self.resume.get_pipe_size() / 2
+            } else {
+                self.cwnd
+            }
         }
-        self.cwnd
     }
 
     fn metrics(&self) -> ControllerMetrics {

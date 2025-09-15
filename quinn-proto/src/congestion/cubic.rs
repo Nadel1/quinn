@@ -224,8 +224,11 @@ impl Controller for Cubic {
             );
 
             self.cubic_state.cwnd_inc = 0;
-
-            self.window = self.minimum_window();
+            if self.resume.safe_retreat && self.resume.enabled() {
+                self.window = self.resume.get_pipe_size() / 2;
+            } else {
+                self.window = self.minimum_window();
+            }
         }
     }
 

@@ -40,6 +40,7 @@ pub(crate) struct OwnResume {
     time_in_state: Instant, //make sure we dont stay in unvalidated phase longer than one rtt
     cwnd: u64,
     rtt: Duration,
+    pub safe_retreat: bool,
 }
 
 impl std::fmt::Debug for OwnResume {
@@ -112,6 +113,7 @@ impl OwnResume {
             total_acked: 0,
             rtt: Duration::ZERO,
             cwnd: 0,
+            safe_retreat: false,
         }
     }
 
@@ -138,8 +140,19 @@ impl OwnResume {
         self.saved_cwnd as f64
     }
 
+    pub(crate) fn get_pipe_size(&self) -> u64 {
+        self.pipesize
+    }
     #[inline]
     pub(crate) fn change_state(&mut self, state: CrState) {
+        match state {
+            CrState::SafeRetreat(_) => {
+                self.safe_retreat = true;
+            }
+            _ => {
+                self.safe_retreat = false;
+            }
+        }
         self.cr_state = state;
     }
     pub(crate) fn get_jump_cwnd(&self) -> u64 {
@@ -180,33 +193,25 @@ impl OwnResume {
                 self.pipesize += bytes_acked;
 
                 if flightsize <= self.pipesize {
-                    self.change_state(
-                        CrState::Normal
-                    );
+                    self.change_state(CrState::Normal);
                     (Some(self.pipesize), None)
                 } else {
                     // Store the last packet number that was sent in the Unvalidated Phase
-                    self.change_state(
-                        CrState::Validating(largest_pkt_ack)
-                    );
+                    self.change_state(CrState::Validating(largest_pkt_ack));
                     (Some(flightsize), None)
                 }
             }
             CrState::Validating(last_packet) => {
                 self.pipesize += bytes_acked;
                 if largest_pkt_ack >= last_packet {
-                    self.change_state(
-                        CrState::Normal
-                    );
+                    self.change_state(CrState::Normal);
                 }
                 (None, None)
             }
             CrState::SafeRetreat(last_packet) => {
                 if largest_pkt_ack >= last_packet {
                     trace!("careful resume complete");
-                    self.change_state(
-                        CrState::Normal
-                    );
+                    self.change_state(CrState::Normal);
                     (None, Some(self.pipesize))
                 } else {
                     self.pipesize += bytes_acked;
@@ -241,8 +246,7 @@ impl OwnResume {
                 let current_rtt = rtt_sample;
 
                 // Confirm RTT is similar to that of the saved connection
-                if current_rtt <= self.saved_rtt / 2 || current_rtt >= self.saved_rtt * 10
-                {
+                if current_rtt <= self.saved_rtt / 2 || current_rtt >= self.saved_rtt * 10 {
                     println!(
                         "current RTT too divergent from saved RTT - not using careful resume; \
                     rtt_sample={:?} saved_rtt={:?}",
