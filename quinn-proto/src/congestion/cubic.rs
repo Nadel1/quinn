@@ -245,6 +245,11 @@ impl Controller for Cubic {
             self.state.cwnd_inc = 0;
 
             self.state.window = self.minimum_window();
+            self.cubic_state.cwnd_inc = 0;
+            if self.resume.safe_retreat && self.resume.enabled() {
+                self.state.window = self.resume.get_pipe_size() / 2;
+            } else {
+                self.state.window = self.minimum_window();
         }
     }
 
