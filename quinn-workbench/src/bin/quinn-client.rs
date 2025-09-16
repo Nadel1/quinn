@@ -11,11 +11,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::Parser;
 use quinn::{
-    congestion::{BbrConfig, CubicConfig, NewRenoConfig},
     AckFrequencyConfig, VarInt,
+    congestion::{BbrConfig, CubicConfig, NewRenoConfig},
 };
 use quinn_proto::crypto::rustls::QuicClientConfig;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
@@ -149,7 +149,7 @@ async fn run(options: Opt) -> Result<()> {
     let initial_rtt = options.initial_rtt;
     let idle_timeout = options.idle_timeout;
     let requests = options.requests;
-    let logging_name=options.logging_name;
+    let logging_name = options.logging_name;
     let mut ack_freq = AckFrequencyConfig::default();
 
     let threshold = VarInt::from_u32(options.ack_eliciting_threshold);
@@ -175,16 +175,21 @@ async fn run(options: Opt) -> Result<()> {
             transport_config.congestion_controller_factory(Arc::new(NewRenoConfig::default()))
         }
         "cubic" => {
+            println!("-----------using cubic in client!--------------");
             let mut cubic_config: CubicConfig = CubicConfig::default();
             cubic_config.initial_window(options.initial_cwnd); //change window
             transport_config.congestion_controller_factory(Arc::new(cubic_config))
         }
         "bbr" => {
+            println!("-----------using bbr in client!--------------");
             let mut bbr_config = BbrConfig::default();
             bbr_config.initial_window(options.initial_cwnd);
             transport_config.congestion_controller_factory(Arc::new(bbr_config))
         }
-        _ => transport_config.congestion_controller_factory(Arc::new(NewRenoConfig::default())),
+        _ => {
+            println!("----using new reno in client-----");
+            transport_config.congestion_controller_factory(Arc::new(NewRenoConfig::default()))
+        }
     };
     client_config.transport_config(Arc::new(transport_config));
     let mut endpoint = quinn::Endpoint::client(options.bind)?;
