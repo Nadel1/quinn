@@ -179,19 +179,24 @@ async fn run(options: Opt) -> Result<()> {
 
     match ccontrol.as_str() {
         "newReno" => {
+            println!("-----------using new reno in server!--------------");
             transport_config.congestion_controller_factory(Arc::new(NewRenoConfig::default()))
         }
         "cubic" => {
+            println!("-----------using cubic in server!--------------");
             let mut cubic_config: CubicConfig = CubicConfig::default();
             cubic_config.initial_window(options.initial_cwnd); //change window
             transport_config.congestion_controller_factory(Arc::new(cubic_config))
         }
         "bbr" => {
+            println!("-----------using bbr in server!--------------");
             let mut bbr_config = BbrConfig::default();
             bbr_config.initial_window(options.initial_cwnd);
             transport_config.congestion_controller_factory(Arc::new(bbr_config))
         }
-        _ => transport_config.congestion_controller_factory(Arc::new(NewRenoConfig::default())),
+        _ => {
+            println!("-----------using new reno in server!--------------");
+            transport_config.congestion_controller_factory(Arc::new(NewRenoConfig::default()))},
     };
 
     server_config.transport_config(Arc::new(transport_config));
