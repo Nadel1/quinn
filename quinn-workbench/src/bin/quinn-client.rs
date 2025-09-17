@@ -192,7 +192,7 @@ async fn run(options: Opt) -> Result<()> {
         }
     };
     client_config.transport_config(Arc::new(transport_config));
-    let mut endpoint = quinn::Endpoint::client(options.bind)?;
+    let mut endpoint: quinn::Endpoint = quinn::Endpoint::client(options.bind)?;
     endpoint.set_default_client_config(client_config);
 
     let request = format!("GET {}\r\n", url.path());
