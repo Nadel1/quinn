@@ -135,11 +135,11 @@ impl Controller for Cubic {
                     CrState::Unvalidated => {}
                     CrState::SafeRetreat(_) => {}
                     _ => {
-                         self.state.window += bytes;
+                        self.state.window += bytes;
                     }
                 }
             } else {
-                 self.state.window += bytes;
+                self.state.window += bytes;
             }
         } else {
             // Congestion avoidance.
@@ -245,11 +245,12 @@ impl Controller for Cubic {
             self.state.cwnd_inc = 0;
 
             self.state.window = self.minimum_window();
-            self.cubic_state.cwnd_inc = 0;
+            self.state.cwnd_inc = 0;
             if self.resume.safe_retreat && self.resume.enabled() {
                 self.state.window = self.resume.get_pipe_size() / 2;
             } else {
                 self.state.window = self.minimum_window();
+            }
         }
     }
 
@@ -291,11 +292,11 @@ impl Controller for Cubic {
     }
 
     fn set_cwnd(&mut self, new_window: u64) {
-        self.window = new_window;
+        self.state.window = new_window;
     }
 
     fn set_ssthresh(&mut self, new_ssthresh: Option<u64>) {
-        self.ssthresh = new_ssthresh.unwrap();
+        self.state.ssthresh = new_ssthresh.unwrap();
     }
 
     fn set_pacing_rate(&mut self, new_pacing_rate: u64) {
