@@ -14,16 +14,17 @@ use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info};
 
-use perf::{
-    CommonOpt, init_tracing,
+use crate::{
+    CommonOpt, PERF_CIPHER_SUITES,
     noprotection::NoProtectionClientConfig,
+    parse_byte_size,
     stats::{OpenStreamStats, Stats},
 };
 
 /// Connects to a QUIC perf server and maintains a specified pattern of requests until interrupted
 #[derive(Parser)]
 #[clap(name = "client")]
-struct Opt {
+pub struct Opt {
     /// Host to connect to
     #[clap(default_value = "localhost:4433")]
     host: String,
@@ -40,10 +41,16 @@ struct Opt {
     #[clap(long, default_value = "1")]
     bi_requests: u64,
     /// Number of bytes to request
-    #[clap(long, default_value = "1048576")]
+    ///
+    /// This can use SI suffixes for sizes. For example, 1M will transfer
+    /// 1MiB, 10G will transfer 10GiB.
+    #[clap(long, default_value = "1M", value_parser = parse_byte_size)]
     download_size: u64,
     /// Number of bytes to transmit, in addition to the request header
-    #[clap(long, default_value = "1048576")]
+    ///
+    /// This can use SI suffixes for sizes. For example, 1M will transfer
+    /// 1MiB, 10G will transfer 10GiB.
+    #[clap(long, default_value = "1M", value_parser = parse_byte_size)]
     upload_size: u64,
     /// The time to run in seconds
     #[clap(long, default_value = "60")]
@@ -60,18 +67,7 @@ struct Opt {
     common: CommonOpt,
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
-    let opt = Opt::parse();
-
-    init_tracing();
-
-    if let Err(e) = run(opt).await {
-        error!("{:#}", e);
-    }
-}
-
-async fn run(opt: Opt) -> Result<()> {
+pub async fn run(opt: Opt) -> Result<()> {
     let mut host_parts = opt.host.split(':');
     let host_name = host_parts.next().unwrap();
     let host_port = host_parts
@@ -102,11 +98,14 @@ async fn run(opt: Opt) -> Result<()> {
 
     let socket = opt.common.bind_socket(bind_addr)?;
 
-    let endpoint = quinn::Endpoint::new(Default::default(), None, socket, Arc::new(TokioRuntime))?;
+    let mut endpoint_cfg = quinn::EndpointConfig::default();
+    endpoint_cfg.max_udp_payload_size(opt.common.max_udp_payload_size)?;
+
+    let endpoint = quinn::Endpoint::new(endpoint_cfg, None, socket, Arc::new(TokioRuntime))?;
 
     let default_provider = rustls::crypto::ring::default_provider();
     let provider = Arc::new(rustls::crypto::CryptoProvider {
-        cipher_suites: perf::PERF_CIPHER_SUITES.into(),
+        cipher_suites: PERF_CIPHER_SUITES.into(),
         ..default_provider
     });
 

@@ -1,17 +1,17 @@
-use std::{fs, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use clap::Parser;
 use quinn::{TokioRuntime, crypto::rustls::QuicServerConfig};
-use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, pem::PemObject};
 use tracing::{debug, error, info};
 
-use perf::{CommonOpt, PERF_CIPHER_SUITES, init_tracing, noprotection::NoProtectionServerConfig};
+use crate::{CommonOpt, PERF_CIPHER_SUITES, noprotection::NoProtectionServerConfig};
 
 #[derive(Parser)]
 #[clap(name = "server")]
-struct Opt {
+pub struct Opt {
     /// Address to listen on
     #[clap(long = "listen", default_value = "[::]:4433")]
     listen: SocketAddr,
@@ -26,33 +26,19 @@ struct Opt {
     common: CommonOpt,
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
-    let opt = Opt::parse();
-
-    init_tracing();
-
-    if let Err(e) = run(opt).await {
-        error!("{:#}", e);
-    }
-}
-
-async fn run(opt: Opt) -> Result<()> {
+pub async fn run(opt: Opt) -> Result<()> {
     let (key, cert) = match (&opt.key, &opt.cert) {
-        (Some(key), Some(cert)) => {
-            let key = fs::read(key).context("reading key")?;
-            let cert = fs::read(cert).expect("reading cert");
-            (
-                PrivatePkcs8KeyDer::from(key),
-                rustls_pemfile::certs(&mut cert.as_ref())
-                    .collect::<Result<_, _>>()
-                    .context("parsing cert")?,
-            )
-        }
+        (Some(key), Some(cert)) => (
+            PrivateKeyDer::from_pem_file(key).context("reading private key")?,
+            CertificateDer::pem_file_iter(cert)
+                .context("reading certificate chain file")?
+                .collect::<Result<_, _>>()
+                .context("reading certificate chain")?,
+        ),
         _ => {
             let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
             (
-                PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der()),
+                PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der()).into(),
                 vec![CertificateDer::from(cert.cert)],
             )
         }
@@ -68,7 +54,7 @@ async fn run(opt: Opt) -> Result<()> {
         .with_protocol_versions(&[&rustls::version::TLS13])
         .unwrap()
         .with_no_client_auth()
-        .with_single_cert(cert, key.into())
+        .with_single_cert(cert, key)
         .unwrap();
     crypto.alpn_protocols = vec![b"perf".to_vec()];
 
@@ -90,13 +76,11 @@ async fn run(opt: Opt) -> Result<()> {
 
     let socket = opt.common.bind_socket(opt.listen)?;
 
-    let endpoint = quinn::Endpoint::new(
-        Default::default(),
-        Some(config),
-        socket,
-        Arc::new(TokioRuntime),
-    )
-    .context("creating endpoint")?;
+    let mut endpoint_cfg = quinn::EndpointConfig::default();
+    endpoint_cfg.max_udp_payload_size(opt.common.max_udp_payload_size)?;
+
+    let endpoint = quinn::Endpoint::new(endpoint_cfg, Some(config), socket, Arc::new(TokioRuntime))
+        .context("creating endpoint")?;
 
     info!("listening on {}", endpoint.local_addr().unwrap());
 
