@@ -9,6 +9,9 @@ use std::{
 
 use bytes::{Bytes, BytesMut};
 use frame::StreamMetaVec;
+use std::fs::File;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use thiserror::Error;
@@ -26,8 +29,8 @@ use crate::{
     crypto::{self, KeyPair, Keys, PacketKey},
     frame::{self, Close, Datagram, FrameStruct, NewConnectionId, NewToken},
     packet::{
-        FixedLengthConnectionIdParser, Header, InitialHeader, InitialPacket, LongType, Packet,
-        PacketNumber, PartialDecode, SpaceId,
+        self, FixedLengthConnectionIdParser, Header, InitialHeader, InitialPacket, LongType,
+        Packet, PacketNumber, PartialDecode, SpaceId,
     },
     range_set::ArrayRangeSet,
     shared::{
@@ -239,6 +242,7 @@ pub struct Connection {
     stats: ConnectionStats,
     /// QUIC version used for the connection.
     version: u32,
+    logging_name: String,
 }
 
 impl Connection {
@@ -271,6 +275,7 @@ impl Connection {
             expected_token: Bytes::new(),
             client_hello: None,
         });
+        let logging_file = config.logging_file.clone();
         let mut rng = StdRng::from_seed(rng_seed);
         let mut this = Self {
             endpoint_config,
@@ -341,7 +346,7 @@ impl Connection {
             app_limited: false,
             receiving_ecn: false,
             total_authed_packets: 0,
-
+            logging_name: logging_file,
             streams: StreamsState::new(
                 side,
                 config.max_concurrent_uni_streams,
@@ -936,6 +941,14 @@ impl Connection {
                 now,
                 self.orig_rem_cid,
             );
+            self.write_to_log(
+                last_packet_number,
+                buf.len(),
+                self.path.congestion.window(),
+                true,
+                self.path.in_flight.bytes,
+                self.path.rtt.get().as_secs(),
+            );
         }
 
         self.app_limited = buf.is_empty() && !congestion_blocked;
@@ -1010,6 +1023,43 @@ impl Connection {
         })
     }
 
+    pub fn write_to_log(
+        &self,
+        pkt_num: u64,
+        pkt_size: usize,
+        cwnd: u64,
+        sent: bool,
+        bytes_in_flight: u64,
+        measured_rtt: u64,
+    ) {
+        if self.config.logging_file == "" {
+            return;
+        }
+        use std::io::Write;
+        let mut file = File::options()
+            .append(true)
+            .open(self.config.logging_file.clone())
+            .unwrap();
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH);
+        let mut save_string = timestamp.unwrap().as_secs().to_string().to_owned();
+        save_string.push_str(",");
+        if sent {
+            save_string.push_str("SENT,");
+        } else {
+            save_string.push_str("RECEIVED,");
+        }
+        save_string.push_str(&pkt_num.to_string());
+        save_string.push_str(",");
+        save_string.push_str(&pkt_size.to_string());
+        save_string.push_str(",");
+        save_string.push_str(&cwnd.to_string());
+        save_string.push_str(",");
+        save_string.push_str(&bytes_in_flight.to_string());
+        save_string.push_str(",");
+        save_string.push_str(&measured_rtt.to_string());
+        save_string.push_str("\n");
+        let _ = file.write_all(save_string.as_bytes());
+    }
     /// Send PATH_CHALLENGE for a previous path if necessary
     fn send_path_challenge(&mut self, now: Instant, buf: &mut Vec<u8>) -> Option<Transmit> {
         let (prev_cid, prev_path) = self.prev_path.as_mut()?;
@@ -1193,6 +1243,14 @@ impl Connection {
                         &mut self.path,
                         now,
                         self.orig_rem_cid,
+                    );
+                    self.write_to_log(
+                        0,
+                        0,
+                        self.path.congestion.window(),
+                        false,
+                        self.path.in_flight.bytes,
+                        self.path.rtt.get().as_secs(),
                     );
                 }
                 Timer::KeyDiscard => {

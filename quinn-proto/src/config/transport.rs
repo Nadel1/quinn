@@ -37,6 +37,7 @@ pub struct TransportConfig {
     pub(crate) time_threshold: f32,
     pub(crate) initial_rtt: Duration,
     pub(crate) initial_mtu: u16,
+    pub(crate) logging_file: String,
     pub(crate) min_mtu: u16,
     pub(crate) mtu_discovery_config: Option<MtuDiscoveryConfig>,
     pub(crate) pad_to_mtu: bool,
@@ -170,6 +171,10 @@ impl TransportConfig {
     /// The RTT used before an RTT sample is taken
     pub fn initial_rtt(&mut self, value: Duration) -> &mut Self {
         self.initial_rtt = value;
+        self
+    }
+    pub fn logging_file(&mut self, value: String) -> &mut Self {
+        self.logging_file = value;
         self
     }
 
@@ -389,7 +394,7 @@ impl Default for TransportConfig {
             congestion_controller_factory: Arc::new(congestion::CubicConfig::default()),
 
             enable_segmentation_offload: true,
-
+            logging_file: "test_quinn.csv".to_string(),
             qlog_sink: QlogSink::default(),
         }
     }
@@ -424,6 +429,7 @@ impl fmt::Debug for TransportConfig {
             congestion_controller_factory: _,
             enable_segmentation_offload,
             qlog_sink,
+            logging_file,
         } = self;
         let mut s = fmt.debug_struct("TransportConfig");
 
