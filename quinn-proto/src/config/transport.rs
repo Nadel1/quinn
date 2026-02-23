@@ -32,6 +32,7 @@ pub struct TransportConfig {
     pub(crate) receive_window: VarInt,
     pub(crate) send_window: u64,
     pub(crate) send_fairness: bool,
+     pub(crate) logging_file: String,
 
     pub(crate) packet_threshold: u32,
     pub(crate) time_threshold: f32,
@@ -170,6 +171,11 @@ impl TransportConfig {
     /// The RTT used before an RTT sample is taken
     pub fn initial_rtt(&mut self, value: Duration) -> &mut Self {
         self.initial_rtt = value;
+        self
+    }
+
+    pub fn logging_file(&mut self, value: String) -> &mut Self {
+        self.logging_file = value;
         self
     }
 
@@ -389,7 +395,7 @@ impl Default for TransportConfig {
             congestion_controller_factory: Arc::new(congestion::CubicConfig::default()),
 
             enable_segmentation_offload: true,
-
+            logging_file: "test_quinn.csv".to_string(),
             qlog_sink: QlogSink::default(),
         }
     }
@@ -423,6 +429,7 @@ impl fmt::Debug for TransportConfig {
                 deterministic_packet_numbers: _,
             congestion_controller_factory: _,
             enable_segmentation_offload,
+            logging_file,
             qlog_sink,
         } = self;
         let mut s = fmt.debug_struct("TransportConfig");
@@ -451,8 +458,10 @@ impl fmt::Debug for TransportConfig {
             .field("allow_spin", allow_spin)
             .field("datagram_receive_buffer_size", datagram_receive_buffer_size)
             .field("datagram_send_buffer_size", datagram_send_buffer_size)
+            .field("logging_file",logging_file)
             // congestion_controller_factory not debug
             .field("enable_segmentation_offload", enable_segmentation_offload);
+    
         if cfg!(feature = "qlog") {
             s.field("qlog_stream", &qlog_sink.is_enabled());
         }
