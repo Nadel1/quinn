@@ -370,6 +370,17 @@ impl Connection {
             this.write_crypto();
             this.init_0rtt();
         }
+        if this.logging_name != "" {
+            File::create(this.logging_name.clone()).unwrap();
+            use std::io::Write; //has to be included here, otherwise issues with other write calls
+            let mut file = File::options()
+                .append(true)
+                .open(this.logging_name.clone())
+                .unwrap();
+            let save_string =
+                "TIMESTAMP,SENT/RECEIVED,PACKET_NUM,PACKET_SIZE,CWND,BYTES_IN_FLIGHT,RTT\n";
+            let _ = file.write_all(save_string.as_bytes());
+        }
         this
     }
 
