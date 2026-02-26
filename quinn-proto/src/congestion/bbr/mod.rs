@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::cmp;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -8,6 +9,7 @@ use crate::congestion::ControllerMetrics;
 use crate::congestion::bbr::bw_estimation::BandwidthEstimation;
 use crate::congestion::bbr::min_max::MinMax;
 use crate::connection::RttEstimator;
+use crate::connection::resume;
 use crate::{Duration, Instant};
 
 use super::{BASE_DATAGRAM_SIZE, Controller, ControllerFactory};
@@ -56,6 +58,9 @@ pub struct Bbr {
     bw_at_last_round: u64,
     round_wo_bw_gain: u64,
     ack_aggregation: AckAggregationState,
+    carefully_resuming: bool,
+    resume: resume::OwnResume,
+    round_counter_cr: u64,
     random_number_generator: rand::rngs::StdRng,
 }
 
@@ -97,7 +102,10 @@ impl Bbr {
             bw_at_last_round: 0,
             round_wo_bw_gain: 0,
             ack_aggregation: AckAggregationState::default(),
+            carefully_resuming: false,
+            resume: resume::OwnResume::new(resume::SAVED_CC_FILE),
             random_number_generator: rand::rngs::StdRng::from_os_rng(),
+            round_counter_cr: 0,
         }
     }
 
@@ -306,13 +314,32 @@ impl Bbr {
             return;
         }
         let mut target_window = self.get_target_cwnd(self.cwnd_gain);
-        if self.is_at_full_bandwidth {
-            // Add the max recently measured ack aggregation to CWND.
-            target_window += self.ack_aggregation.max_ack_height.get();
+        if self.resume.enabled() {
+            let cr_state = self.resume.get_state();
+            println!("-----in calculate cwnd for bbr!-----");
+            match cr_state {
+                resume::CrState::Unvalidated => {}
+                resume::CrState::SafeRetreat(_) => {}
+                _ => {
+                    if self.is_at_full_bandwidth {
+                        // Add the max recently measured ack aggregation to CWND.
+                        target_window += self.ack_aggregation.max_ack_height.get();
+                    } else {
+                        // Add the most recent excess acked.  Because CWND never decreases in
+                        // STARTUP, this will automatically create a very localized max filter.
+                        target_window += excess_acked;
+                    }
+                }
+            }
         } else {
-            // Add the most recent excess acked.  Because CWND never decreases in
-            // STARTUP, this will automatically create a very localized max filter.
-            target_window += excess_acked;
+            if self.is_at_full_bandwidth {
+                // Add the max recently measured ack aggregation to CWND.
+                target_window += self.ack_aggregation.max_ack_height.get();
+            } else {
+                // Add the most recent excess acked.  Because CWND never decreases in
+                // STARTUP, this will automatically create a very localized max filter.
+                target_window += excess_acked;
+            }
         }
         // Instead of immediately setting the target CWND as the new one, BBR grows
         // the CWND towards |target_window| by only increasing it |bytes_acked| at a
@@ -435,6 +462,18 @@ impl Controller for Bbr {
                 self.current_round_trip_end_packet_number = self.max_sent_packet_number;
                 self.round_count += 1;
             }
+            if self.carefully_resuming && self.round_count - self.round_counter_cr > 2 {
+                self.carefully_resuming = false; //reset carefully resuming flag after two rounds
+            }
+            if self.resume.enabled() {
+                println!("----------resume is enabled----------");
+                self.carefully_resuming = true;
+                //self.probing_rate = 0.5 as u64 * self.max_bandwidth.bandwidth;
+                //let nominal_pacing_rate = self.max_bandwidth.bandwidth * self.pacing_gain as u64;
+
+                //self.set_pacing_rate(cmp::max(nominal_pacing_rate, self.probing_rate));
+                self.round_counter_cr = self.round_count;
+            }
         }
 
         self.update_recovery_state(is_round_start);
@@ -468,6 +507,10 @@ impl Controller for Bbr {
         lost_bytes: u64,
     ) {
         self.loss_state.lost_bytes += lost_bytes;
+        if self.carefully_resuming && self.mode == Mode::Startup {
+            self.mode = Mode::Drain; //change to drain if mode is startup and carefully resuming is on
+            self.carefully_resuming = false;
+        }
     }
 
     fn on_mtu_update(&mut self, new_mtu: u16) {
@@ -478,12 +521,20 @@ impl Controller for Bbr {
     }
 
     fn window(&self) -> u64 {
-        if self.mode == Mode::ProbeRtt {
-            return self.get_probe_rtt_cwnd();
-        } else if self.recovery_state.in_recovery() && self.mode != Mode::Startup {
-            return self.cwnd.min(self.recovery_window);
+        if !self.carefully_resuming {
+            if self.mode == Mode::ProbeRtt {
+                return self.get_probe_rtt_cwnd();
+            } else if self.recovery_state.in_recovery() && self.mode != Mode::Startup {
+                return self.cwnd.min(self.recovery_window);
+            }
+            self.cwnd
+        } else {
+            if self.resume.safe_retreat {
+                self.resume.get_pipe_size() / 2
+            } else {
+                self.cwnd
+            }
         }
-        self.cwnd
     }
 
     fn set_cwnd(&mut self, new_window: u64) {
