@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use super::{BASE_DATAGRAM_SIZE, Controller, ControllerFactory};
 use crate::connection::RttEstimator;
+use crate::connection::resume;
+use crate::connection::resume::CrState;
 use crate::{Duration, Instant};
-
 /// CUBIC Constants.
 ///
 /// These are recommended value in RFC8312.
@@ -70,6 +71,8 @@ pub struct Cubic {
     recovery_start_time: Option<Instant>,
     cubic_state: State,
     current_mtu: u64,
+    resume: resume::OwnResume,
+    pacing_rate: u64,
 }
 
 impl Cubic {
@@ -82,6 +85,8 @@ impl Cubic {
             config,
             cubic_state: Default::default(),
             current_mtu: current_mtu as u64,
+            resume: resume::OwnResume::new(resume::SAVED_CC_FILE),
+            pacing_rate: 0,
         }
     }
 
@@ -110,7 +115,19 @@ impl Controller for Cubic {
 
         if self.window < self.ssthresh {
             // Slow start
-            self.window += bytes;
+            if self.resume.enabled() {
+                println!("------------Careful resume is enabled!!!------------");
+                let cr_state = self.resume.get_state();
+                match cr_state {
+                    CrState::Unvalidated => {}
+                    CrState::SafeRetreat(_) => {}
+                    _ => {
+                        self.window += bytes;
+                    }
+                }
+            } else {
+                self.window += bytes;
+            }
         } else {
             // Congestion avoidance.
             let ca_start_time;
@@ -208,6 +225,11 @@ impl Controller for Cubic {
             self.cubic_state.cwnd_inc = 0;
 
             self.window = self.minimum_window();
+            if self.resume.safe_retreat && self.resume.enabled() {
+                self.window = self.resume.get_pipe_size() / 2;
+            } else {
+                self.window = self.minimum_window();
+            }
         }
     }
 
@@ -238,6 +260,18 @@ impl Controller for Cubic {
 
     fn into_any(self: Box<Self>) -> Box<dyn Any> {
         self
+    }
+
+    fn set_cwnd(&mut self, new_window: u64) {
+        self.window = new_window;
+    }
+
+    fn set_ssthresh(&mut self, new_ssthresh: Option<u64>) {
+        self.ssthresh = new_ssthresh.unwrap();
+    }
+
+    fn set_pacing_rate(&mut self, new_pacing_rate: u64) {
+        self.pacing_rate = new_pacing_rate;
     }
 }
 

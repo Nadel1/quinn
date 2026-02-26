@@ -486,6 +486,18 @@ impl Controller for Bbr {
         self.cwnd
     }
 
+    fn set_cwnd(&mut self, new_window: u64) {
+        self.cwnd = new_window;
+    }
+
+    fn set_ssthresh(&mut self, new_ssthresh: Option<u64>) {
+        todo!()
+    }
+
+    fn set_pacing_rate(&mut self, new_pacing_rate: u64) {
+        self.pacing_rate = new_pacing_rate;
+    }
+
     fn metrics(&self) -> ControllerMetrics {
         ControllerMetrics {
             congestion_window: self.window(),

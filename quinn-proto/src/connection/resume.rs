@@ -1,0 +1,295 @@
+// Based on: https://github.com/ana-cc/quiche/blob/resume_latest/quiche/src/recovery/congestion/resume.rs (11.08.2025)
+
+use std::{
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    u64,
+};
+//write back saved cc params to file
+use std::fs;
+use std::path::Path;
+
+use tracing::trace;
+
+pub(crate) const SAVED_CC_FILE: &str = "saved_params.csv";
+pub(crate) const PACING_MULTIPLIER: f64 = 1.25;
+
+const PARAMS_MAXIMUM_GAP: Duration = Duration::from_secs(120 * 60);
+
+// No observe state as that always applies to the saved connection and never the current connection
+#[derive(Default, Debug, Copy, Clone, Eq, PartialEq)]
+pub(crate) enum CrState {
+    #[default]
+    Reconnaissance,
+    // The next two states store the first packet sent when entering that state
+    Unvalidated,
+    Validating(u64),
+    // Stores the last packet sent during the Unvalidated Phase
+    SafeRetreat(u64),
+    Normal,
+}
+//TODO: add deleted qlog metrics back in
+#[derive(Clone)]
+pub(crate) struct OwnResume {
+    enabled: bool,
+    cr_state: CrState,
+    saved_rtt: Duration,
+    saved_cwnd: u64,
+    pipesize: u64,
+    jump_cwnd: u64,
+    pub total_acked: u64,
+    time_in_state: Instant, //make sure we dont stay in unvalidated phase longer than one rtt
+    cwnd: u64,
+    rtt: Duration,
+    pub safe_retreat: bool,
+}
+
+impl std::fmt::Debug for OwnResume {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "cr_state={:?} ", self.cr_state)?;
+        write!(f, "saved_rtt={:?} ", self.saved_rtt)?;
+        write!(f, "saved_cwnd={:?} ", self.saved_cwnd)?;
+        write!(f, "pipesize={:?} ", self.pipesize)?;
+
+        Ok(())
+    }
+}
+
+impl OwnResume {
+    pub(crate) fn new(file_name: &str) -> Self {
+        // enabled will become false if either of the required CR ENV VARS is not supplied
+        let mut enabled = true;
+        let mut saved_rtt = Duration::from_secs(u64::MAX);
+
+        let mut saved_cwnd = 0;
+        let mut saved_time = Duration::ZERO;
+        if Path::new(SAVED_CC_FILE).exists() {
+            let file_contents = fs::read_to_string(file_name).unwrap();
+            let file_array: Vec<&str> = file_contents.split(',').collect();
+            if file_array.len() > 1 {
+                let rtt_string = file_array[1];
+                if let Ok(rtt_int) = rtt_string.parse::<u64>() {
+                    saved_rtt = Duration::from_secs(rtt_int.try_into().unwrap());
+                    println!("Found saved rtt! {:?}", saved_rtt);
+                } else {
+                    println!("Didnt find rtt");
+                }
+
+                let cwnd_string = file_array[3];
+                if let Ok(cwnd_int) = cwnd_string.parse::<u64>() {
+                    saved_cwnd = cwnd_int;
+                    println!("Found saved cwnd! {:?}", saved_cwnd);
+                } else {
+                    println!("Didnt find cwnd");
+                }
+
+                let time_string = file_array[5];
+                if let Ok(time_int) = time_string.parse::<u64>() {
+                    saved_time = Duration::from_secs(time_int.try_into().unwrap());
+                    println!("Found saved time! {:?}", saved_time);
+                } else {
+                    println!("Didnt find time");
+                }
+                let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+                if current_time - saved_time > PARAMS_MAXIMUM_GAP {
+                    //abort
+                    println!("Parameter timestamp too old, abort CR!");
+                    enabled = false;
+                }
+            } else {
+                enabled = false;
+            }
+        } else {
+            enabled = false;
+        }
+
+        Self {
+            time_in_state: Instant::now(),
+            enabled,
+            cr_state: CrState::default(),
+            saved_rtt,
+            saved_cwnd,
+            jump_cwnd: 0,
+            pipesize: 0,
+            total_acked: 0,
+            rtt: Duration::ZERO,
+            cwnd: 0,
+            safe_retreat: false,
+        }
+    }
+
+    pub(crate) fn enabled(&mut self) -> bool {
+        if self.enabled {
+            self.cr_state != CrState::Normal
+        } else {
+            if self.cr_state != CrState::Normal {
+                self.change_state(CrState::Normal);
+            }
+
+            false
+        }
+    }
+    pub(crate) fn get_state(&self) -> CrState {
+        self.cr_state
+    }
+
+    pub(crate) fn get_saved_rtt(&self) -> u64 {
+        self.saved_rtt.as_secs() as u64
+    }
+
+    pub(crate) fn get_saved_cwnd(&self) -> f64 {
+        self.saved_cwnd as f64
+    }
+
+    pub(crate) fn get_pipe_size(&self) -> u64 {
+        self.pipesize
+    }
+    #[inline]
+    pub(crate) fn change_state(&mut self, state: CrState) {
+        match state {
+            CrState::SafeRetreat(_) => {
+                self.safe_retreat = true;
+            }
+            _ => {
+                self.safe_retreat = false;
+            }
+        }
+        self.cr_state = state;
+    }
+    pub(crate) fn get_jump_cwnd(&self) -> u64 {
+        self.jump_cwnd
+    }
+
+    pub(crate) fn set_saved_rtt(&mut self, new_rtt: u64) {
+        self.saved_rtt = Duration::from_secs(new_rtt)
+    }
+    pub(crate) fn get_state_timer(&mut self) -> Instant {
+        self.time_in_state
+    }
+
+    pub(crate) fn check_flight_size(
+        &mut self,
+        flight_size: u64,
+        initial_window: u64,
+        first_packet: u64,
+    ) -> u64 {
+        if flight_size < initial_window || flight_size <= self.pipesize {
+            self.change_state(CrState::Normal);
+            return self.pipesize;
+        } else {
+            self.change_state(CrState::Validating(first_packet));
+            return flight_size;
+        }
+    }
+    // Returns (new_cwnd, new_ssthresh), both optional
+    pub(crate) fn process_ack(
+        &mut self,
+        largest_pkt_ack: u64,
+        bytes_acked: u64,
+        flightsize: u64,
+    ) -> (Option<u64>, Option<u64>) {
+        self.total_acked += bytes_acked;
+        match self.cr_state {
+            CrState::Unvalidated => {
+                self.pipesize += bytes_acked;
+
+                if flightsize <= self.pipesize {
+                    self.change_state(CrState::Normal);
+                    (Some(self.pipesize), None)
+                } else {
+                    // Store the last packet number that was sent in the Unvalidated Phase
+                    self.change_state(CrState::Validating(largest_pkt_ack));
+                    (Some(flightsize), None)
+                }
+            }
+            CrState::Validating(last_packet) => {
+                self.pipesize += bytes_acked;
+                if largest_pkt_ack >= last_packet {
+                    self.change_state(CrState::Normal);
+                }
+                (None, None)
+            }
+            CrState::SafeRetreat(last_packet) => {
+                if largest_pkt_ack >= last_packet {
+                    trace!("careful resume complete");
+                    self.change_state(CrState::Normal);
+                    (None, Some(self.pipesize))
+                } else {
+                    self.pipesize += bytes_acked;
+                    (None, None)
+                }
+            }
+            _ => (None, None),
+        }
+    }
+
+    //returns cwnd
+    pub(crate) fn send_packet(
+        &mut self,
+        rtt_sample: Duration,
+        cwnd: u64,
+        app_limited: bool,
+        iw_acked: bool,
+    ) -> u64 {
+        self.cwnd = cwnd;
+        self.rtt = rtt_sample;
+        // Do nothing when data limited to avoid having insufficient data
+        // to be able to validate transmission at a higher rate
+        if app_limited {
+            return cwnd; //self.saved_cwnd;
+        }
+        if !iw_acked {
+            return cwnd; //self.saved_cwnd;
+        }
+        match self.cr_state {
+            CrState::Reconnaissance => {
+                //check rtt in recon: path changed or rtt too small?
+                let current_rtt = rtt_sample;
+
+                // Confirm RTT is similar to that of the saved connection
+                if current_rtt <= self.saved_rtt / 2 || current_rtt >= self.saved_rtt * 10 {
+                    println!(
+                        "current RTT too divergent from saved RTT - not using careful resume; \
+                    rtt_sample={:?} saved_rtt={:?}",
+                        current_rtt, self.saved_rtt
+                    );
+                    self.change_state(CrState::Normal);
+                }
+                self.change_state(CrState::Unvalidated);
+                self.time_in_state = Instant::now();
+                self.pipesize = cwnd;
+                self.jump_cwnd = self.saved_cwnd / 2;
+                println!("-----------jump is: {:?}----------", self.jump_cwnd);
+                if self.jump_cwnd == 0 {
+                    self.change_state(CrState::Normal);
+                    return cwnd;
+                }
+                return self.jump_cwnd;
+            }
+
+            _ => return cwnd,
+        }
+    }
+
+    pub(crate) fn congestion_event(&mut self, largest_pkt_sent: u64) -> u64 {
+        println!("in congestion event!!");
+        match self.cr_state {
+            CrState::Unvalidated => {
+                println!("congestion during reconnaissance - abandoning careful resume");
+                self.change_state(CrState::SafeRetreat(largest_pkt_sent));
+                self.pipesize / 2
+            }
+            CrState::Validating(_) => {
+                println!("congestion during reconnaissance - abandoning careful resume");
+                self.change_state(CrState::Normal);
+                0
+            }
+            CrState::Reconnaissance => {
+                println!("congestion during reconnaissance - abandoning careful resume");
+
+                self.change_state(CrState::Normal);
+                0
+            }
+            _ => 0,
+        }
+    }
+}

@@ -82,6 +82,13 @@ pub trait Controller: Send + Sync {
 
     /// Returns Self for use in down-casting to extract implementation details
     fn into_any(self: Box<Self>) -> Box<dyn Any>;
+
+    /// methods used by careful resume to change the cwnd and ssthresh accordingly
+    fn set_cwnd(&mut self, new_window: u64);
+    /// sets the ssthresh (needed during safe retreat of careful resume)
+    fn set_ssthresh(&mut self, new_ssthresh: Option<u64>);
+    /// sets pacing rate (needed during unvalidated state of careful resume)
+    fn set_pacing_rate(&mut self, new_pacing_rate: u64);
 }
 
 /// Common congestion controller metrics

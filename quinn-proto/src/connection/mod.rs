@@ -1,10 +1,5 @@
 use std::{
-    cmp,
-    collections::VecDeque,
-    convert::TryFrom,
-    fmt, io, mem,
-    net::{IpAddr, SocketAddr},
-    sync::Arc,
+    cmp, collections::VecDeque, convert::TryFrom, fmt, io, mem, net::{IpAddr, SocketAddr}, path::Path, sync::Arc
 };
 
 use bytes::{Bytes, BytesMut};
@@ -93,6 +88,8 @@ use std::fs::File;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use timer::{Timer, TimerTable};
+
+pub(crate) mod resume;
 
 /// Protocol state and logic for a single QUIC connection
 ///
@@ -242,6 +239,9 @@ pub struct Connection {
     /// QUIC version used for the connection.
     version: u32,
     logging_name: String,
+
+    // Careful resume
+    resume: resume::OwnResume,
 }
 
 impl Connection {
@@ -361,6 +361,7 @@ impl Connection {
             rng,
             stats: ConnectionStats::default(),
             version,
+            resume: resume::OwnResume::new(resume::SAVED_CC_FILE),
         };
         if path_validated {
             this.on_path_validated();
@@ -1469,6 +1470,18 @@ impl Connection {
     /// faster or reduce loss to settle on optimal values by restarting from the initial
     /// configuration in the [`TransportConfig`].
     pub fn path_changed(&mut self, now: Instant) {
+        if self.resume.enabled() {
+            let cr_state = self.resume.get_state();
+            match cr_state {
+                resume::CrState::Reconnaissance => {
+                    self.resume.change_state(resume::CrState::Normal);
+                }
+                resume::CrState::Unvalidated => {
+                    self.resume.change_state(resume::CrState::Normal);
+                }
+                _ => {}
+            }
+        }
         self.path.reset(now, &self.config);
     }
 
@@ -1504,6 +1517,42 @@ impl Connection {
             self.spaces[SpaceId::Data].pending.max_data = true;
         }
     }
+    fn calculate_saved_params(&mut self) {
+        //rtt as low as possible, cwnd as high as  possible
+
+        if Path::new(resume::SAVED_CC_FILE).exists() {
+            let mut saved_cwnd = self.resume.get_saved_cwnd();
+            let mut saved_rtt = self.resume.get_saved_rtt();
+
+            if saved_rtt > self.rtt().as_secs() {
+                saved_rtt = self.rtt().as_secs();
+                self.resume.set_saved_rtt(saved_rtt);
+            }
+
+            if saved_cwnd < self.path.congestion.window() as f64 {
+                saved_cwnd = self.path.congestion.window() as f64;
+            }
+            if saved_cwnd > (4 * self.path.congestion.initial_window()) as f64 {
+                self.write_params_to_file(saved_rtt, saved_cwnd as usize);
+            }
+        } else {
+            File::create(resume::SAVED_CC_FILE).unwrap();
+        }
+    }
+    fn write_params_to_file(&mut self, saved_rtt: u64, saved_cwnd: usize) {
+        use std::io::Write; //this is specifically imported here and not in the beginning (yes i know, looks ugly), because other writes will be unsure which import to use otherwise
+        let mut file = File::create(resume::SAVED_CC_FILE).unwrap();
+        let mut save_string = "SAVED_RTT,".to_owned();
+        save_string.push_str(&saved_rtt.to_string());
+        save_string.push_str(",SAVED_CWND,");
+        save_string.push_str(&saved_cwnd.to_string());
+        save_string.push_str(",timestamp,");
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH);
+        save_string.push_str(&timestamp.unwrap().as_secs().to_string());
+
+        println!("Saving: {}", save_string);
+        let _ = file.write_all(save_string.as_bytes());
+    }
 
     fn on_ack_received(
         &mut self,
@@ -1527,12 +1576,26 @@ impl Connection {
                     // congestion window.
                     space.largest_acked_packet_sent = info.time_sent;
                 }
+                if self.resume.enabled() {
+                    let (new_cwnd, new_ssthresh) = self.resume.process_ack(
+                        space.largest_ack_eliciting_sent,
+                        space.largest_acked_packet.unwrap(),
+                        self.path.in_flight.bytes,
+                    );
+                    if let Some(new_cwnd) = new_cwnd {
+                        self.path.congestion.set_cwnd(new_cwnd);
+                    }
+                    if let Some(new_ssthresh) = new_ssthresh {
+                        self.path.congestion.set_ssthresh(Some(new_ssthresh));
+                    }
+                }
                 true
             } else {
                 false
             }
         };
-
+        let bytes_acked = self.resume.total_acked;
+        let iw_acked = bytes_acked >= self.path.congestion.initial_window() / 1200;
         // Avoid DoS from unreasonably huge ack ranges by filtering out just the new acks.
         let mut newly_acked = ArrayRangeSet::new();
         for range in ack.iter() {
@@ -1597,7 +1660,56 @@ impl Connection {
                     Some((space, self.spaces[space].next_packet_number));
             }
         }
+        if self.resume.enabled() {
+            let cwnd = self.resume.send_packet(
+                self.path.rtt.get(),
+                self.path.congestion.window(),
+                self.app_limited,
+                iw_acked,
+            );
+            self.path.congestion.set_cwnd(cwnd);
+            match self.resume.get_state() {
+                resume::CrState::Normal => {
+                    if !self.path.rtt.get().is_zero() {
+                        let rate = resume::PACING_MULTIPLIER * self.path.congestion.window() as f64
+                            / self.path.rtt.get().as_secs_f64();
+                        self.path.congestion.set_pacing_rate(rate as u64);
+                    }
+                }
+                resume::CrState::Unvalidated => {
+                    //dont stay in unvalidated state longer than one rtt
+                    let now = Instant::now();
+                    if now - self.resume.get_state_timer() > self.rtt()
+                        || self.path.in_flight.bytes >= self.path.congestion.window()
+                    {
+                        let new_cwnd = self.resume.check_flight_size(
+                            self.path.in_flight.bytes,
+                            self.path.congestion.initial_window(),
+                            ack.largest,
+                        );
+                        self.path.congestion.set_cwnd(new_cwnd);
+                    }
 
+                    if !self.path.rtt.get().is_zero() {
+                        //see page 19 of https://datatracker.ietf.org/doc/draft-ietf-tsvwg-careful-resume/
+                        let inter_transmission_time: f64 = (self.path.rtt.get().as_secs_f64()
+                            * self.datagrams().max_size().unwrap() as f64)
+                            / self.resume.get_jump_cwnd() as f64;
+
+                        self.path
+                            .congestion
+                            .set_pacing_rate(inter_transmission_time as u64);
+                    }
+                }
+                _ => {}
+            }
+        }
+        match self.resume.get_state() {
+            resume::CrState::Normal => {
+                self.calculate_saved_params();
+            }
+            _ => {}
+        }
         // Must be called before crypto/pto_count are clobbered
         self.detect_lost_packets(now, space, true);
 
@@ -1834,6 +1946,15 @@ impl Connection {
                 }
                 self.spaces[pn_space].pending |= info.retransmits;
                 self.path.mtud.on_non_probe_lost(packet, info.size);
+            }
+            if self.resume.enabled() {
+                let new_cwnd = self.resume.congestion_event(largest_lost);
+                if new_cwnd != 0 {
+                    self.path.congestion.set_cwnd(cmp::max(
+                        new_cwnd as u64,
+                        self.path.congestion.initial_window(),
+                    ));
+                }
             }
 
             if self.path.mtud.black_hole_detected(now) {
