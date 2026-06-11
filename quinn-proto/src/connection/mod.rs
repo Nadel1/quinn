@@ -1549,8 +1549,6 @@ impl Connection {
         save_string.push_str(",timestamp,");
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH);
         save_string.push_str(&timestamp.unwrap().as_secs().to_string());
-
-        println!("Saving: {}", save_string);
         let _ = file.write_all(save_string.as_bytes());
     }
 
