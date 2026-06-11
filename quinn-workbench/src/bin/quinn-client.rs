@@ -57,7 +57,7 @@ struct Opt {
     idle_timeout: u64,
 
     /// number requests
-    #[clap(long = "requests", default_value = "10")]
+    #[clap(long = "requests", default_value = "1")]
     requests: u64,
 
     /// number requests
