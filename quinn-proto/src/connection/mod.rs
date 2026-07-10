@@ -2543,14 +2543,6 @@ impl Connection {
                             packet.header.is_1rtt(),
                         );
                     }
-                    self.write_to_log(
-                        number.unwrap(),
-                        packet.payload.len(),
-                        self.path.congestion.window(),
-                        false,
-                        self.path.in_flight.bytes,
-                        self.path.rtt.get().as_secs(),
-                    );
                     self.process_decrypted_packet(now, remote, number, packet)
                 }
             }
