@@ -4,7 +4,7 @@
 
 use std::{
     fs,
-    io::{self, Write},
+    io::{self},
     net::{SocketAddr, ToSocketAddrs},
     path::PathBuf,
     sync::Arc,

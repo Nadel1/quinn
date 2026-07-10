@@ -1,5 +1,11 @@
 use std::{
-    cmp, collections::VecDeque, convert::TryFrom, fmt, io, mem, net::{IpAddr, SocketAddr}, path::Path, sync::Arc
+    cmp,
+    collections::VecDeque,
+    convert::TryFrom,
+    fmt, io, mem,
+    net::{IpAddr, SocketAddr},
+    path::Path,
+    sync::Arc,
 };
 
 use bytes::{Bytes, BytesMut};
@@ -1283,6 +1289,7 @@ impl Connection {
         )
     }
 
+    /// Write given data to log file.
     pub fn write_to_log(
         &self,
         pkt_num: u64,

@@ -174,6 +174,7 @@ impl TransportConfig {
         self
     }
 
+    /// Set logging file to be used.
     pub fn logging_file(&mut self, value: String) -> &mut Self {
         self.logging_file = value;
         self
