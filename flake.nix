@@ -79,8 +79,8 @@
       {
         packages = {
 
-          quinn = buildRustPackage "quinn" "quinn";
-          default = self.packages.${system}.quinn;
+          quinn-workbench = buildRustPackage "quinn-workbench" "quinn-workbench";
+          default = self.packages.${system}.quinn-workbench;
         };
         devShells.default =
           let
