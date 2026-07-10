@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.86"
 bon = "3.3.0"
+regex = "1.10.5"
 clap = { version = "4", features = ["derive"] }
 console = "0.15.11"
 fastrand = { version = "2.1.0" }

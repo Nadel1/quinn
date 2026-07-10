@@ -2,19 +2,22 @@
 //!
 //! Checkout the `README.md` for guidance.
 
+use regex::Regex;
 use std::{
-    ascii, fs, io,
+    ascii,
+    fs::{self, File},
+    io::{self, Seek, SeekFrom, Write},
     net::SocketAddr,
-    path::{self, Path, PathBuf},
-    str,
+    path::{Path, PathBuf},
+    str::{self, FromStr},
     sync::Arc,
 };
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::Parser;
 use quinn::{
-    congestion::{BbrConfig, CubicConfig, NewRenoConfig},
     AckFrequencyConfig, VarInt,
+    congestion::{BbrConfig, CubicConfig, NewRenoConfig},
 };
 use quinn_proto::crypto::rustls::QuicServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
@@ -70,6 +73,33 @@ struct Opt {
     initial_cwnd: u64,
     #[clap(long = "logging-file", default_value = "server.csv")]
     logging_name: String,
+}
+
+struct MemRequest(u64);
+
+impl FromStr for MemRequest {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let r = Regex::new(r"([0-9]+)([a-zA-Z]*)").unwrap();
+        let c = r.captures(s).ok_or(())?;
+        let number = c.get(1).unwrap().as_str().parse::<u64>().map_err(|_| ())?;
+        let unit = c.get(2).unwrap().as_str();
+        println!("str: {:?}, number: {:?}, unit: {:?}", s, number, unit);
+
+        let number = if unit.is_empty() | unit.eq_ignore_ascii_case("B") {
+            number
+        } else if unit.eq_ignore_ascii_case("kB") {
+            number * 1E3 as u64
+        } else if unit.eq_ignore_ascii_case("MB") {
+            number * 1E6 as u64
+        } else if unit.eq_ignore_ascii_case("GB") {
+            number * 1E9 as u64
+        } else {
+            return Err(());
+        };
+        Ok(Self(number))
+    }
 }
 
 fn main() {
@@ -158,7 +188,7 @@ async fn run(options: Opt) -> Result<()> {
     let mut transport_config = quinn::TransportConfig::default(); //Arc::get_mut(&mut server_config.transport).unwrap();
     let initial_rtt = options.initial_rtt;
     let idle_timeout = options.idle_timeout;
-    let logging_name=options.logging_name;
+    let logging_name = options.logging_name;
     transport_config
         .max_concurrent_uni_streams(0_u8.into())
         .initial_rtt(Duration::from_millis(initial_rtt))
@@ -197,7 +227,8 @@ async fn run(options: Opt) -> Result<()> {
         }
         _ => {
             println!("-----------using new reno in server!--------------");
-            transport_config.congestion_controller_factory(Arc::new(NewRenoConfig::default()))},
+            transport_config.congestion_controller_factory(Arc::new(NewRenoConfig::default()))
+        }
     };
 
     server_config.transport_config(Arc::new(transport_config));
@@ -309,7 +340,7 @@ async fn handle_request(
     Ok(())
 }
 
-fn process_get(root: &Path, x: &[u8]) -> Result<Vec<u8>> {
+fn process_get(_root: &Path, x: &[u8]) -> Result<Vec<u8>> {
     if x.len() < 4 || &x[0..4] != b"GET " {
         bail!("missing GET");
     }
@@ -318,26 +349,23 @@ fn process_get(root: &Path, x: &[u8]) -> Result<Vec<u8>> {
     }
     let x = &x[4..x.len() - 2];
     let end = x.iter().position(|&c| c == b' ').unwrap_or(x.len());
-    let path = str::from_utf8(&x[..end]).context("path is malformed UTF-8")?;
-    let path = Path::new(&path);
-    let mut real_path = PathBuf::from(root);
-    let mut components = path.components();
-    match components.next() {
-        Some(path::Component::RootDir) => {}
-        _ => {
-            bail!("path must be absolute");
+
+    let file_path = str::from_utf8(&x[1..end]).context("path is malformed UTF-8")?;
+
+    let mem_request = MemRequest::from_str(file_path).ok();
+    let mut file = File::create(file_path).unwrap();
+    file.seek(SeekFrom::Start(mem_request.unwrap().0)).unwrap();
+    file.write_all(&[0]).unwrap();
+
+    let data = fs::read(&file_path).context("failed reading file")?;
+    let remove = fs::remove_file(file_path);
+    match remove {
+        Ok(()) => println!("Successfully removed generated file"),
+
+        Err(e) => {
+            // Done writing.
+            println!("Error while removing generated file: {:?}", e);
         }
-    }
-    for c in components {
-        match c {
-            path::Component::Normal(x) => {
-                real_path.push(x);
-            }
-            x => {
-                bail!("illegal component in path: {:?}", x);
-            }
-        }
-    }
-    let data = fs::read(&real_path).context("failed reading file")?;
+    };
     Ok(data)
 }
