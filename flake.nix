@@ -21,9 +21,7 @@
         };
         cargoLock = {
           lockFile = ./Cargo.lock;
-          outputHashes = {
-            "wirefilter-engine-0.7.0" = "sha256-vPelFk4BBqb/YkfC8EKYp/C/clannq8iHjGYZYtOftQ=";
-          };
+          
         };
         buildRustPackage =
           name: path:
@@ -81,8 +79,8 @@
       {
         packages = {
 
-          tokio-quiche = buildRustPackage "tokio-quiche" "tokio-quiche";
-          default = self.packages.${system}.tokio-quiche;
+          quinn = buildRustPackage "quinn" "quinn";
+          default = self.packages.${system}.quinn;
         };
         devShells.default =
           let
