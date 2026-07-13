@@ -155,6 +155,7 @@ async fn run(options: Opt) -> Result<()> {
     let threshold = VarInt::from_u32(options.ack_eliciting_threshold);
     ack_freq.ack_eliciting_threshold(threshold);
     ack_freq.max_ack_delay(Some(Duration::from_micros(options.requested_max_ack_delay)));
+    println!("Setting idle timeout to: {:?}", idle_timeout);
     transport_config
         .initial_rtt(Duration::from_millis(initial_rtt))
         .max_idle_timeout(Some(
