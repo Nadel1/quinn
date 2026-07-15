@@ -155,7 +155,7 @@ async fn run(options: Opt) -> Result<()> {
     let threshold = VarInt::from_u32(options.ack_eliciting_threshold);
     ack_freq.ack_eliciting_threshold(threshold);
     ack_freq.max_ack_delay(Some(Duration::from_micros(options.requested_max_ack_delay)));
-    println!("Setting idle timeout to: {:?}", idle_timeout);
+    
     transport_config
         .initial_rtt(Duration::from_millis(initial_rtt))
         .max_idle_timeout(Some(
@@ -183,6 +183,7 @@ async fn run(options: Opt) -> Result<()> {
         }
         "bbr" => {
             println!("-----------using bbr in client!--------------");
+            println!("Setting idle timeout to: {:?}", idle_timeout);
             let mut bbr_config = BbrConfig::default();
             bbr_config.initial_window(options.initial_cwnd);
             transport_config.congestion_controller_factory(Arc::new(bbr_config))

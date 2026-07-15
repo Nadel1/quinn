@@ -221,6 +221,7 @@ async fn run(options: Opt) -> Result<()> {
         }
         "bbr" => {
             println!("-----------using bbr in server!--------------");
+            println!("idle timeout in server: {:?}", idle_timeout);
             let mut bbr_config = BbrConfig::default();
             bbr_config.initial_window(options.initial_cwnd);
             transport_config.congestion_controller_factory(Arc::new(bbr_config))
