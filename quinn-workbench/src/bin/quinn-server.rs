@@ -333,13 +333,27 @@ async fn handle_request(
     });
     println!("Server sending: {}", resp.len());
 
+    let x = &req[4..req.len() - 2];
+
+    let end = x.iter().position(|&c| c == b' ').unwrap_or(x.len());
+
+    let file_path = str::from_utf8(&x[1..end]).context("path is malformed UTF-8")?;
+
+    let remove = fs::remove_file(file_path);
+    match remove {
+        Ok(()) => println!("Successfully removed generated file"),  
+        Err(e) => {
+            // Done writing.
+            println!("Error while removing generated file: {:?}", e);
+        }
+    };
     // Write the response
     send.write_all(&resp)
         .await
         .map_err(|e| anyhow!("failed to send response: {}", e))?;
     // Gracefully terminate the stream
     send.finish().unwrap();
-    info!("complete");
+    println!("complete");
     Ok(())
 }
 
@@ -361,14 +375,6 @@ fn process_get(_root: &Path, x: &[u8]) -> Result<Vec<u8>> {
     file.write_all(&[0]).unwrap();
 
     let data = fs::read(&file_path).context("failed reading file")?;
-    let remove = fs::remove_file(file_path);
-    match remove {
-        Ok(()) => println!("Successfully removed generated file"),
 
-        Err(e) => {
-            // Done writing.
-            println!("Error while removing generated file: {:?}", e);
-        }
-    };
     Ok(data)
 }
