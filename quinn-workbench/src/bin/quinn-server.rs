@@ -331,6 +331,7 @@ async fn handle_request(
         error!("failed: {}", e);
         format!("failed to process request: {e}\n").into_bytes()
     });
+    println!("Server sending: {}", resp.len());
 
     // Write the response
     send.write_all(&resp)
