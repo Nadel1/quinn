@@ -360,14 +360,14 @@ fn process_get(_root: &Path, x: &[u8]) -> Result<Vec<u8>> {
     file.write_all(&[0]).unwrap();
 
     let data = fs::read(&file_path).context("failed reading file")?;
-    //let remove = fs::remove_file(file_path);
-    //match remove {
-    //    Ok(()) => println!("Successfully removed generated file"),
-//
-    //    Err(e) => {
-    //        // Done writing.
-    //        println!("Error while removing generated file: {:?}", e);
-    //    }
-    //};
+    let remove = fs::remove_file(file_path);
+    match remove {
+        Ok(()) => println!("Successfully removed generated file"),
+
+        Err(e) => {
+            // Done writing.
+            println!("Error while removing generated file: {:?}", e);
+        }
+    };
     Ok(data)
 }
