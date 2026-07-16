@@ -155,7 +155,7 @@ async fn run(options: Opt) -> Result<()> {
     let threshold = VarInt::from_u32(options.ack_eliciting_threshold);
     ack_freq.ack_eliciting_threshold(threshold);
     ack_freq.max_ack_delay(Some(Duration::from_micros(options.requested_max_ack_delay)));
-    
+
     transport_config
         .initial_rtt(Duration::from_millis(initial_rtt))
         .max_idle_timeout(Some(
@@ -233,19 +233,12 @@ async fn run(options: Opt) -> Result<()> {
             .read_to_end(usize::MAX)
             .await
             .map_err(|e| anyhow!("failed to read response: {}", e))?;
-        //let resp = timeout(Duration::from_secs(5),recv.read_to_end(usize::MAX)).await.map_err(|e| anyhow!("failed to read response: {}", e))?;
-        //match resp{
-        //    Ok(value)=>value,
-        //    Err(e)=>Vec<u8>
-        //}
         let duration = response_start.elapsed();
         eprintln!(
             "response received in {:?} - {} KiB/s",
             duration,
             resp.len() as f32 / (duration_secs(&duration) * 1024.0)
         );
-        //io::stdout().write_all(&resp).unwrap();
-        //io::stdout().flush().unwrap();
     }
     conn.close(0u32.into(), b"done");
 
