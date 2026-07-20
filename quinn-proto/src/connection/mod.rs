@@ -2543,6 +2543,7 @@ impl Connection {
                             packet.header.is_1rtt(),
                         );
                     }
+                    println!("Received: {:?}", packet.payload.len());
                     self.write_to_log(
                         number.unwrap(),
                         packet.payload.len(),
